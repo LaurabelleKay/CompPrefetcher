@@ -76,7 +76,6 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
                     tables[i].lru++;
                 }
             }
-            cout << "Assign " << distance << " new row in " << index << endl;
             tables[index].lru = 0;
             previous_distance = distance;
             previous_addr = cl_address;
@@ -103,10 +102,8 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         {
             prefetch_line(ip, addr, pf_address, FILL_LLC);
         }
-
-        cout << "Previous set" << endl;
-        //FIXME: DOn't use the previous distance to index the table!
-        tables[previous_distance].d1 = distance;
+        
+        tables[previous_index].d1 = distance;
         previous_addr = cl_address;
         previous_distance = distance;
         previous_index = index;
@@ -114,7 +111,6 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
     else
     {
         fr = 0;
-        cout << "First run" << fr << endl;
         previous_addr = cl_address;
         //previous_distance = distance;
     }
