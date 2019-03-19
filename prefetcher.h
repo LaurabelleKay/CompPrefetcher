@@ -4,6 +4,7 @@
 #include "cache.h"
 
 //Stride Prefetcher -----------------------------------------------------------
+
 #define IP_TRACKER_COUNT 1024
 #define PREFETCH_DEGREE 3
 
@@ -32,6 +33,7 @@ class STRIDE
 };
 
 //Next Line -------------------------------------------------------------------
+
 #define N_DEGREE 1
 
 class NEXTLINE
@@ -44,6 +46,7 @@ class NEXTLINE
 
 
 //Distance --------------------------------------------------------------------
+
 #define TABLE_COUNT 1024
 #define DISTANCE_COUNT 3
 
@@ -64,6 +67,7 @@ class DISTANCE
 };
 
 //Cache tracker----------------------------------------------------------------
+
 class CACHELINE
 {
     public:
@@ -81,6 +85,27 @@ class CACHELINE
       void insert(uint64_t addr, uint8_t pf);
       void remove(uint64_t addr);
       int search(uint64_t addr);
+};
+
+//Composite--------------------------------------------------------------------
+
+class PFENTRY
+{
+    public:
+        uint64_t pf_addr;
+        uint32_t pf_tag;
+        uint32_t lru;
+
+        PFENTRY()
+        {
+            pf_addr = 0;
+            pf_tag = 0;
+            lru = 0;
+        }
+
+        void insert(uint64_t addr);
+        void remove(uint64_t addr);
+        int search(uint64_t addr);
 };
 
 #endif
