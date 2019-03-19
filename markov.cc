@@ -47,65 +47,101 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
     int index = -1;
     int pindex = -1;
     //TODO: On first run, don't search for previous address
-
-    //check entry for last address to see if this address is in it
-    //if so, add to probability
-    //if not, remove one with lowest probability and add it
-    int min = 1E04;
-    for (int i = 0; i < PREDICTION_COUNT; i++)
+    if(!fr)
     {
-        if (mk_table[prev_index].predictions[i].probability < min)
+        //check entry for last address to see if this address is in it
+        for(pindex = 0; pindex < PREDICTION_COUNT; pindex++)
         {
-            min = mk_table[prev_index].predictions[pindex].probability;
-            pindex = i;
-            break;
+            if(mk_table[prev_index].predictions[pindex].addr == cl_addr)
+            {
+                mk_table[prev_index].predictions[pindex].probability ++;
+                break;
+            }
         }
-    }
 
-    mk_table[prev_index].predictions[pindex].addr = cl_addr;
-    mk_table[prev_index].predictions[pindex].probability = 1;
-
-
-    //Look for this address in our table
-    for(index = 0; index < MK_ENTRY_COUNT; index++)
-    {
-        if(mk_table[index].miss_addr == cl_addr)
+        //If it's not in the table
+        if(pindex == PREDICTION_COUNT)
         {
-            break;
-        }
-    }
+            int min = 1E04;
 
-    //If this address is not in the table, allocate it an entry
-    if(index == MK_ENTRY_COUNT)
-    {
-        for(index = 0; index < MK_ENTRY_COUNT; index ++)
+            //Remove prediction with lowest probability
+            for (int i = 0; i < PREDICTION_COUNT; i++)
+            {
+                if (mk_table[prev_index].predictions[i].probability < min)
+                {
+                    min = mk_table[prev_index].predictions[pindex].probability;
+                    pindex = i;
+                    break;
+                }
+            }
+            
+            mk_table[prev_index].predictions[pindex].addr = cl_addr;
+            mk_table[prev_index].predictions[pindex].probability = 1;
+        }    
+
+        //Look for this address in our table
+        for (index = 0; index < MK_ENTRY_COUNT; index++)
         {
-            if(mk_table[index].lru == (MK_ENTRY_COUNT - 1))
+            if (mk_table[index].miss_addr == cl_addr)
             {
                 break;
             }
         }
 
-        mk_table[index].miss_addr = cl_addr;
-
-        for(int i = 0; i < MK_ENTRY_COUNT; i++)
+        //If this address is not in the table, allocate it an entry
+        if (index == MK_ENTRY_COUNT)
         {
-            if(mk_table[i].lru < mk_table[index].lru)
+            for (index = 0; index < MK_ENTRY_COUNT; index++)
             {
-                mk_table[i].lru++;
+                if (mk_table[index].lru == (MK_ENTRY_COUNT - 1))
+                {
+                    break;
+                }
+            }
+
+            mk_table[index].miss_addr = cl_addr;
+
+            for (int i = 0; i < MK_ENTRY_COUNT; i++)
+            {
+                if (mk_table[i].lru < mk_table[index].lru)
+                {
+                    mk_table[i].lru++;
+                }
+            }
+            mk_table[index].lru = 0;
+            prev_addr = addr;
+
+            return;
+        }
+
+        if (index == -1)
+        {
+            assert(0);
+        }
+        uint64_t pf_addr;
+        for (int i = 0; i < PREDICTION_COUNT; i++)
+        {
+            if(mk_table[index].predictions[i].addr != 0)
+            {
+                pf_addr = mk_table[index].predictions[i].addr << LOG2_BLOCK_SIZE;
+
+                if (MSHR.occupancy < (MSHR.SIZE >> 1))
+                {
+                    prefetch_line(ip, addr, pf_addr, FILL_L2);
+                }
+                else
+                {
+                    prefetch_line(ip, addr, pf_addr, FILL_LLC);
+                }
             }
         }
-        mk_table[index].lru = 0;
-        prev_addr = addr;
-
-        return;
     }
-
-    if(index == -1) {assert(0);}
-
-    for(int i = 0; i < PREDICTION_COUNT; i++)
+    else
     {
-
+        fr = 0;
+        prev_addr = cl_addr;
+        mk_table[0].miss_addr = cl_addr;
+        prev_index = 0;
     }
 }
 

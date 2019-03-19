@@ -1,12 +1,12 @@
 #include "cache.h"
 
 #define TABLE_COUNT 1024
+#define DISTANCE_COUNT 3
 
 typedef struct distance_table
 {
     int tag;
-    int d1;
-    int d2;
+    int distances[DISTANCE_COUNT];
     int lru;
 } distance_table_t;
 
@@ -20,30 +20,49 @@ unsigned long long int previous_page;
 
 void CACHE::l2c_prefetcher_initialize()
 {
-    int i;
+    int i, j;
     for (i = 0; i < TABLE_COUNT; i++)
     {
         tables[i].tag = -1E06;
-        tables[i].d1 = 0;
-        tables[i].d2 = 0;
         tables[i].lru = i;
+        for (j = 0; j < DISTANCE_COUNT; j++)
+        {
+            tables[i].distances[j] = 0;
+        }
     }
+
     fr = 1;
 }
 
 void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     unsigned long long int cl_address = addr >> LOG2_BLOCK_SIZE;
+    unsigned long long int page = cl_address >> LOG2_BLOCK_SIZE;
 
     int distance;
     int index;
+    int dindex;
     //if(cache_hit == 0) {return;}
     if (!fr)
     {
         index = -1;
+        dindex = -1;
 
         //Calculate this distance
         distance = cl_address - previous_addr;
+        if (distance = 0)
+        {
+            return;
+        }
+
+        for (dindex = 0; dindex < DISTANCE_COUNT; dindex++)
+        {
+            if (tables[previous_index].distances[dindex] == 0)
+            {
+                tables[previous_index].distances[dindex] = distance;
+                break;
+            }
+        }
 
         for (index = 0; index < TABLE_COUNT; index++)
         {
@@ -60,7 +79,7 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
             for (index = 0; index < TABLE_COUNT; index++)
             {
                 //Find the least recently used row in the table
-                if (tables[index].lru == TABLE_COUNT - 1)
+                if (tables[index].lru == (TABLE_COUNT - 1))
                 {
                     break;
                 }
@@ -90,12 +109,22 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
             assert(0);
         }
 
-        uint64_t pf_address = (cl_address + tables[index].d1) << LOG2_BLOCK_SIZE;
+        uint64_t pf_address;
+
+        for (int i = 0; i < DISTANCE_COUNT; i++)
+        {
+            if (tables[index].distances[i] != 0)
+            {
+                pf_address = (cl_address + tables[index].distances[i]) << LOG2_BLOCK_SIZE;
+                prefetch_line(ip, addr, pf_address, FILL_L2);
+            }
+        }
         /*if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
         {
             //FIXME: Son't return because we haven't set previous values
             return;
         }*/
+        /* MSHR.occupancy;
         if (MSHR.occupancy < (MSHR.SIZE >> 1))
         {
             prefetch_line(ip, addr, pf_address, FILL_L2);
@@ -103,13 +132,14 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         else
         {
             prefetch_line(ip, addr, pf_address, FILL_LLC);
-        }
+        }*/
 
         //cout << "Previous set" << endl;
-        tables[previous_index].d1 = distance;
+        //tables[previous_index].d1 = distance;
         previous_addr = cl_address;
         previous_distance = distance;
         previous_index = index;
+        //TODO: update lru!!
     }
     else
     {
