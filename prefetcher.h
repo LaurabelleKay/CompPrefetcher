@@ -10,7 +10,7 @@
 class STRIDE
 {
     public:
-        typedef struct IP_TRACKER
+        typedef struct Ip_tracker
         {
             // the IP we're tracking
             uint64_t ip;
@@ -23,12 +23,12 @@ class STRIDE
 
             // use LRU to evict old IP trackers
             uint32_t lru;
-        }IP_TRACKER_T;
+        }Ip_tracker_t;
 
-    void initialize();
-    uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
-    void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
-    void stats();
+    static void initialize();
+    static uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+    static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
+    static void stats();
 };
 
 //Next Line -------------------------------------------------------------------
@@ -36,23 +36,51 @@ class STRIDE
 
 class NEXTLINE
 {
-    void initialize();
-    uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
-    void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
-    void stats();
+    static void initialize();
+    static uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+    static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
+    static void stats();
 };
 
 
 //Distance --------------------------------------------------------------------
-#define DISTANCE_COUNT 1024
+#define TABLE_COUNT 1024
+#define DISTANCE_COUNT 3
 
 class DISTANCE  
 {
+    public:
+      typedef struct Distance_table
+      {
+          int tag;
+          int distances[DISTANCE_COUNT];
+          int lru;
+      } Distance_table_t;
 
-    void initialize();
-    uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
-    void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
-    void stats();
+      static void initialize();
+      static uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+      static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
+      static void stats();
+};
+
+//Cache tracker----------------------------------------------------------------
+class CACHELINE
+{
+    public:
+      uint64_t addr;
+      uint8_t valid;
+      uint8_t pf;
+
+      CACHELINE()
+      {
+          addr = 0;
+          valid = 0;
+          pf = 0;
+      }
+
+      void insert(uint64_t addr, uint8_t pf);
+      void remove(uint64_t addr);
+      int search(uint64_t addr);
 };
 
 #endif
