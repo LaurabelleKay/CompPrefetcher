@@ -82,14 +82,15 @@ class CACHELINE
         pf = 0;
     }
 
-    void insert(uint64_t addr, uint8_t pf);
-    void remove(uint64_t addr);
-    int search(uint64_t addr);
+    static void insert(uint64_t addr, uint8_t pf);
+    static void remove(uint64_t addr);
+    static int search(uint64_t addr);
 };
 
 //Composite--------------------------------------------------------------------
 #define BUFFER_SIZE 128
 
+//TODO: Buffer needs to be FIFO queue
 class PFENTRY
 {
   public:
@@ -104,10 +105,10 @@ class PFENTRY
         lru = 0;
     }
 
-    void initialize();
-    void insert(uint64_t addr);
-    void remove(uint64_t addr);
-    int search(uint64_t addr);
+    static void initialize();
+    static void insert(uint64_t addr); //TODO: add tag
+    static void remove(uint64_t addr);
+    static int search(uint64_t addr);
 };
 
 #endif
