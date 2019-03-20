@@ -66,15 +66,19 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
 
     for(int i = 0; i < pf_issued; i++)
     {
-
+        
     }
 }
 
 uint64_t NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
-    uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
-    return pf_addr;
+    for(int i = 0; i < N_DEGREE; i++)
+    {
+        uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
+        PFENTRY::insert(pf_addr);
+        pf_issued++;
+    }
 }
 
 uint64_t STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
@@ -109,7 +113,6 @@ uint64_t STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t 
         }
         trackers[index].lru = 0;
 
-        //FIXME: return a value to indicate that there was no prefetch
         return;
     }
 
@@ -134,8 +137,6 @@ uint64_t STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t 
         stride *= -1;
     }
 
-    //cout << "[IP_STRIDE] HIT  index: " << index << " lru: " << trackers[index].lru << " ip: " << hex << ip << " cl_addr: " << cl_addr << dec << " stride: " << stride << endl;
-
     // don't do anything if we somehow saw the same address twice in a row
     if (stride == 0)
     {
@@ -157,7 +158,7 @@ uint64_t STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t 
             if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
                 break;
 
-            // check the MSHR occupancy to decide if we're going to prefetch to the L2 or LLC
+            PFENTRY::insert(pf_address);
             //FIXME: put in CACHE operate / put in queue  and operate can select later
             /*if (MSHR.occupancy < (MSHR.SIZE >> 1))
                 prefetch_line(ip, addr, pf_address, FILL_L2);
@@ -179,13 +180,13 @@ uint64_t STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t 
 
 uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    unsigned long long int cl_address = addr >> LOG2_BLOCK_SIZE;
-    unsigned long long int page = cl_address >> LOG2_BLOCK_SIZE;
+    uint64_t cl_address = addr >> LOG2_BLOCK_SIZE;
+    uint64_t page = cl_address >> LOG2_BLOCK_SIZE;
 
     int distance;
     int index;
     int dindex;
-    //if(cache_hit == 0) {return;}
+
     if (!fr)
     {
         index = -1;
@@ -252,33 +253,17 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
             assert(0);
         }
 
-        uint64_t pf_address;
+        uint64_t pf_addr;
 
         for (int i = 0; i < DISTANCE_COUNT; i++)
         {
             if (dtables[index].distances[i] != 0)
             {
-                pf_address = (cl_address + dtables[index].distances[i]) << LOG2_BLOCK_SIZE;
-                //prefetch_line(ip, addr, pf_address, FILL_L2);
+                pf_addr = (cl_address + dtables[index].distances[i]) << LOG2_BLOCK_SIZE;
+                PFENTRY::insert(pf_addr);
             }
         }
-        /*if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
-        {
-            //FIXME: Son't return because we haven't set previous values
-            return;
-        }*/
-        /* MSHR.occupancy;
-        if (MSHR.occupancy < (MSHR.SIZE >> 1))
-        {
-            prefetch_line(ip, addr, pf_address, FILL_L2);
-        }
-        else
-        {
-            prefetch_line(ip, addr, pf_address, FILL_LLC);
-        }*/
 
-        //cout << "Previous set" << endl;
-        //tables[previous_index].d1 = distance;
         previous_addr = cl_address;
         previous_distance = distance;
         previous_index = index;
@@ -289,7 +274,6 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
         fr = 0;
         cout << "First run" << fr << endl;
         previous_addr = cl_address;
-        //previous_distance = distance;
     }
 }
 
@@ -307,7 +291,7 @@ void PFENTRY::insert(uint64_t addr)
     {
         if(pf_buffer[i].pf_addr == 0)
         {
-            pf_buffer[i];pf_addr = addr;
+            pf_buffer[i].pf_addr = addr;
         }
     }
 }
@@ -316,7 +300,10 @@ void PFENTRY::remove(uint64_t addr)
 {
     for(int i = 0; i < BUFFER_SIZE; i++)
     {
-        if()
+        if(pf_buffer[i].pf_addr == addr)
+        {
+            pf_buffer[i].pf_addr = 0;
+        }
     }
 }
 
