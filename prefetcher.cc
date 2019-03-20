@@ -1,6 +1,10 @@
 #include "prefetcher.h"
 
+//Stride-----------------------------------------------------------------------
+
 STRIDE::Ip_tracker_t trackers[IP_TRACKER_COUNT];
+
+//Distance---------------------------------------------------------------------
 
 DISTANCE::Distance_table_t dtables[DISTANCE_COUNT];
 int fr;
@@ -9,12 +13,17 @@ int previous_index;
 int previous_addr;
 unsigned long long int previous_page;
 
-CACHELINE cl[4096];
+//Cache tracker----------------------------------------------------------------
+
+CACHELINE cache[4096];
 int cache_size;
 int misses;
 int acc_count;
 int pf_count;
 int pf_use;
+
+PFENTRY pf_buffer[BUFFER_SIZE];
+int pf_issued = 0;
 
 void CACHE::l2c_prefetcher_initialize()
 {
@@ -49,16 +58,22 @@ void DISTANCE::initialize()
     fr = 1;
 }
 
+void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+{
+    NEXTLINE::operate(addr, ip, cache_hit, type);
+    STRIDE::operate(addr, ip, cache_hit, type);
+    DISTANCE::operate(addr, ip, cache_hit, type);
+
+    for(int i = 0; i < pf_issued; i++)
+    {
+
+    }
+}
+
 uint64_t NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
-    uint64_t pf_addr;
-    //FIXME: use N in CACHE::prefetch operate
-    for (int i = 1; i < PREFETCH_DEGREE + 1; i++)
-    {
-        pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
-        //prefetch_line(ip, addr, pf_addr, FILL_L2);
-    }
+    uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
     return pf_addr;
 }
 
@@ -278,21 +293,48 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
     }
 }
 
+void PFENTRY::initialize()
+{
+    for(int i = 0; i < BUFFER_SIZE; i++)
+    {
+        pf_buffer[i].lru = i;
+    }
+}
+
+void PFENTRY::insert(uint64_t addr)
+{
+    for(int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if(pf_buffer[i].pf_addr == 0)
+        {
+            pf_buffer[i];pf_addr = addr;
+        }
+    }
+}
+
+void PFENTRY::remove(uint64_t addr)
+{
+    for(int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if()
+    }
+}
+
 void CACHELINE::insert(uint64_t addr, uint8_t pf)
 {
     int i;
     for (i = 0; i < cache_size; i++)
         //Find an empty slot in the cache
-        if (cl[i].valid == 0)
+        if (cache[i].valid == 0)
         {
-            cl[i].valid = 1;
-            cl[i].addr = addr;
-            cl[i].pf = pf;
+            cache[i].valid = 1;
+            cache[i].addr = addr;
+            cache[i].pf = pf;
             return;
         }
-    cl[cache_size].valid = 1;
-    cl[cache_size].addr = addr;
-    cl[cache_size].pf = pf;
+    cache[cache_size].valid = 1;
+    cache[cache_size].addr = addr;
+    cache[cache_size].pf = pf;
     cache_size++;
 }
 
@@ -300,9 +342,9 @@ void CACHELINE::remove(uint64_t addr)
 {
     int i;
     for (i = 0; i < cache_size; i++)
-        if (cl[i].addr == addr)
+        if (cache[i].addr == addr)
         {
-            cl[i].valid = 0;
+            cache[i].valid = 0;
         }
 }
 
@@ -311,7 +353,7 @@ int CACHELINE::search(uint64_t addr)
     int i;
     for (i = 0; i < cache_size; i++)
     {
-        if (cl[i].addr == addr)
+        if (cache[i].addr == addr)
         {
             return i;
         }
