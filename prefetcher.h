@@ -88,10 +88,10 @@ class CACHELINE
 };
 
 //Composite--------------------------------------------------------------------
-#define BUFFER_SIZE 128
+#define BUFFER_SIZE 48
 
 //TODO: Buffer needs to be FIFO queue
-class PFENTRY
+/*class PFENTRY
 {
   public:
     uint64_t pf_addr;
@@ -109,6 +109,32 @@ class PFENTRY
     static void insert(uint64_t addr); //TODO: add tag
     static void remove(uint64_t addr);
     static int search(uint64_t addr);
+};*/
+
+class PFBUFFER
+{
+    public:
+        typedef struct pf_entry
+        {
+            uint64_t pf_addr;
+            uint32_t lru; 
+        }pf_entry_t;
+
+        pf_entry_t entry[BUFFER_SIZE];
+        uint32_t pf_issued;
+
+        PFBUFFER()
+        {
+            for(int i = 0; i < BUFFER_SIZE; i++)
+            {
+                entry[i].pf_addr = 0;
+                entry[i].lru = i;
+            }
+        }
+
+        void insert(uint64_t addr);
+        void remove(uint64_t addr);
+        int search(uint64_t addr);
 };
 
 #endif

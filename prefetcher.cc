@@ -22,7 +22,10 @@ int acc_count;
 int pf_count;
 int pf_use;
 
-PFENTRY pf_buffer[BUFFER_SIZE];
+PFBUFFER nl_buffer;
+PFBUFFER stride_buffer;
+PFBUFFER distance_buffer;
+
 int pf_issued = 0;
 
 void CACHE::l2c_prefetcher_initialize()
@@ -64,9 +67,23 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
     STRIDE::operate(addr, ip, cache_hit, type);
     DISTANCE::operate(addr, ip, cache_hit, type);
 
-    for(int i = 0; i < pf_issued; i++)
+    for(int i = 0; i < BUFFER_SIZE; i++)
     {
-        
+        if(nl_buffer.entry[i].pf_addr != 0)
+        {
+            prefetch_line(ip, addr, nl_buffer.entry[i].pf_addr, FILL_L2);
+            nl_buffer.remove(nl_buffer.entry[i].pf_addr);
+        }
+        if(stride_buffer.entry[i].pf_addr != 0)
+        {
+            prefetch_line(ip, addr, stride_buffer.entry[i].pf_addr, FILL_L2);
+            stride_buffer.remove(stride_buffer.entry[i].pf_addr);
+        }
+        if(distance_buffer.entry[i].pf_addr != 0)
+        {
+            prefetch_line(ip, addr, distance_buffer.entry[i].pf_addr, FILL_L2);
+            distance_buffer.remove(distance_buffer.entry[i].pf_addr);
+        }
     }
 }
 
@@ -76,7 +93,7 @@ uint64_t NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
     for(int i = 0; i < N_DEGREE; i++)
     {
         uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
-        PFENTRY::insert(pf_addr);
+        nl_buffer.insert(pf_addr);
         pf_issued++;
     }
 }
@@ -158,7 +175,7 @@ uint64_t STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t 
             if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
                 break;
 
-            PFENTRY::insert(pf_address);
+            stride_buffer.insert(pf_address);
             //FIXME: put in CACHE operate / put in queue  and operate can select later
             /*if (MSHR.occupancy < (MSHR.SIZE >> 1))
                 prefetch_line(ip, addr, pf_address, FILL_L2);
@@ -260,14 +277,22 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
             if (dtables[index].distances[i] != 0)
             {
                 pf_addr = (cl_address + dtables[index].distances[i]) << LOG2_BLOCK_SIZE;
-                PFENTRY::insert(pf_addr);
+                distance_buffer.insert(pf_addr);
             }
         }
 
         previous_addr = cl_address;
         previous_distance = distance;
         previous_index = index;
-        //TODO: update lru!!
+
+        for(int i = 0; i < TABLE_COUNT; i++)
+        {
+            if(dtables[i].lru < dtables[index].lru)
+            {
+                dtables[i].lru++;
+            }
+        }
+        dtables[index].lru = 0;
     }
     else
     {
@@ -277,34 +302,42 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
     }
 }
 
-void PFENTRY::initialize()
-{
-    for(int i = 0; i < BUFFER_SIZE; i++)
-    {
-        pf_buffer[i].lru = i;
-    }
-}
 
-void PFENTRY::insert(uint64_t addr)
+void PFBUFFER::insert(uint64_t addr)
 {
     for(int i = 0; i < BUFFER_SIZE; i++)
     {
-        if(pf_buffer[i].pf_addr == 0)
+        if(this->entry[i].pf_addr == 0)
         {
-            pf_buffer[i].pf_addr = addr;
+            this->entry[i].pf_addr = addr;
+            this->pf_issued++;
+            return;
         }
     }
 }
 
-void PFENTRY::remove(uint64_t addr)
+void PFBUFFER::remove(uint64_t addr)
 {
     for(int i = 0; i < BUFFER_SIZE; i++)
     {
-        if(pf_buffer[i].pf_addr == addr)
+        if(this->entry[i].pf_addr == addr)
         {
-            pf_buffer[i].pf_addr = 0;
+            this->entry[i].pf_addr = 0;
         }
     }
+}
+
+int PFBUFFER::search(uint64_t addr)
+{
+    int index = -1;
+    for(index = 0; index < BUFFER_SIZE; index++)
+    {
+        if(this->entry[index].pf_addr == addr)
+        {
+            return index;
+        }
+    }
+    return index;
 }
 
 void CACHELINE::insert(uint64_t addr, uint8_t pf)
