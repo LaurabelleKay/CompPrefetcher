@@ -27,7 +27,7 @@ class STRIDE
     } Ip_tracker_t;
 
     static void initialize();
-    static uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+    static void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
     static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
     static void stats();
 };
@@ -40,7 +40,7 @@ class NEXTLINE
 {
   public:
     static void initialize();
-    static uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+    static void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
     static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
     static void stats();
 };
@@ -61,7 +61,7 @@ class DISTANCE
     } Distance_table_t;
 
     static void initialize();
-    static uint64_t operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+    static void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
     static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
     static void stats();
 };
@@ -89,27 +89,6 @@ class CACHELINE
 
 //Composite--------------------------------------------------------------------
 #define BUFFER_SIZE 48
-
-//TODO: Buffer needs to be FIFO queue
-/*class PFENTRY
-{
-  public:
-    uint64_t pf_addr;
-    uint32_t pf_tag;
-    uint32_t lru;
-
-    PFENTRY()
-    {
-        pf_addr = 0;
-        pf_tag = 0;
-        lru = 0;
-    }
-
-    static void initialize();
-    static void insert(uint64_t addr); //TODO: add tag
-    static void remove(uint64_t addr);
-    static int search(uint64_t addr);
-};*/
 
 class PFBUFFER
 {

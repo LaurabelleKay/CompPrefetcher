@@ -30,6 +30,8 @@ int pf_issued = 0;
 
 void CACHE::l2c_prefetcher_initialize()
 {
+    cout << "\"Name\": "
+         << "\"Naive\"," << endl;
     STRIDE::initialize();
     DISTANCE::initialize();
 }
@@ -85,9 +87,24 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
             distance_buffer.remove(distance_buffer.entry[i].pf_addr);
         }
     }
+
+    acc_count++;
+    if (!cache_hit)
+    {
+        misses++;
+    }
+    int index = CACHELINE::search(addr);
+    if (index != -1)
+    {
+        if (cache[index].pf == 1)
+        {
+            pf_use++;
+            cache[index].pf = 0;
+        }
+    }
 }
 
-uint64_t NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
     for(int i = 0; i < N_DEGREE; i++)
@@ -98,7 +115,7 @@ uint64_t NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
     }
 }
 
-uint64_t STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     // check for a tracker hit
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
@@ -195,7 +212,7 @@ uint64_t STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t 
     trackers[index].lru = 0;
 }
 
-uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     uint64_t cl_address = addr >> LOG2_BLOCK_SIZE;
     uint64_t page = cl_address >> LOG2_BLOCK_SIZE;
@@ -211,11 +228,12 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
 
         //Calculate this distance
         distance = cl_address - previous_addr;
-        if (distance = 0)
+        if (distance == 0)
         {
             return;
         }
 
+        //Find a slot in the previous delta's entry for this distance
         for (dindex = 0; dindex < DISTANCE_COUNT; dindex++)
         {
             if (dtables[previous_index].distances[dindex] == 0)
@@ -233,6 +251,7 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
                 break;
             }
         }
+
         //If this distance is not in our table
         if (index == TABLE_COUNT)
         {
@@ -257,10 +276,11 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
                     dtables[i].lru++;
                 }
             }
-            //cout << "Assign " << distance << " new row in " << index << endl;
+
             dtables[index].lru = 0;
             previous_distance = distance;
             previous_addr = cl_address;
+
             return;
         }
 
@@ -297,7 +317,6 @@ uint64_t DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_
     else
     {
         fr = 0;
-        cout << "First run" << fr << endl;
         previous_addr = cl_address;
     }
 }
@@ -337,7 +356,7 @@ int PFBUFFER::search(uint64_t addr)
             return index;
         }
     }
-    return index;
+    return -1;
 }
 
 void CACHELINE::insert(uint64_t addr, uint8_t pf)
@@ -379,4 +398,23 @@ int CACHELINE::search(uint64_t addr)
         }
     }
     return -1;
+}
+
+void CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr)
+{
+    uint64_t cl_address = addr >> LOG2_BLOCK_SIZE;
+    uint64_t evict_addr = addr >> LOG2_BLOCK_SIZE;
+    CACHELINE::insert(addr, prefetch);
+    if (prefetch == 1)
+    {
+        pf_count++;
+    }
+    //int index = cache_search(evict_addr);
+    CACHELINE::remove(evicted_addr);
+}
+
+void CACHE::l2c_prefetcher_final_stats()
+{
+    float pf_accuracy = (pf_use * 1.0) / (pf_count * 1.0);
+    cout << "\"Accuracy\": " << pf_accuracy << endl;
 }
