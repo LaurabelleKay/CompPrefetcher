@@ -62,7 +62,8 @@ int cache_search(uint64_t addr)
 
 void CACHE::l2c_prefetcher_initialize()
 {
-    cout << "CPU " << cpu << "Next N-line prefetcher" << endl;
+    cout << "\"Name\": "
+         << "\"Next N\"," << endl;
 }
 
 void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
@@ -94,14 +95,17 @@ void CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way,
 {
     uint64_t cl_address = addr >> LOG2_BLOCK_SIZE;
     uint64_t evict_addr = addr >> LOG2_BLOCK_SIZE;
-    cache_insert(cl_address, prefetch);
+    cache_insert(addr, prefetch);
     if (prefetch == 1)
     {
         pf_count++;
-        int index = cache_search(evict_addr);
     }
+    //int index = cache_search(evict_addr);
+    cache_remove(evicted_addr);
 }
 
 void CACHE::l2c_prefetcher_final_stats()
 {
+    float pf_accuracy = (pf_use * 1.0) / (pf_count * 1.0);
+    cout << "\"Accuracy\": " << pf_accuracy << endl;
 }
