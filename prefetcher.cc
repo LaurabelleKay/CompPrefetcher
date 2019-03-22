@@ -6,7 +6,7 @@ STRIDE::Ip_tracker_t trackers[IP_TRACKER_COUNT];
 
 //Distance---------------------------------------------------------------------
 
-DISTANCE::Distance_table_t dtables[DISTANCE_COUNT];
+DISTANCE::Distance_table_t dtables[TABLE_COUNT];
 int fr;
 int previous_distance;
 int previous_index;
@@ -37,6 +37,7 @@ void CACHE::l2c_prefetcher_initialize()
     STRIDE::initialize();
     DISTANCE::initialize();
     trial_p = 1;
+    timer = 0;
 }
 
 void STRIDE::initialize()
@@ -70,13 +71,13 @@ int select()
     float max = 0;
     int pf = -1;
 
-    pf = nl_buffer.accuracy > max ? 1 : pf;
+    pf = nl_buffer.accuracy > max ? 0 : pf;
     max = nl_buffer.accuracy > max ? nl_buffer.accuracy : max;
 
-    pf = stride_buffer.accuracy > max ? 2 : pf;
+    pf = stride_buffer.accuracy > max ? 1 : pf;
     max = stride_buffer.accuracy > max ? stride_buffer.accuracy : max;
 
-    pf = distance_buffer.accuracy > max ? 3 : pf;
+    pf = distance_buffer.accuracy > max ? 2 : pf;
     max = distance_buffer.accuracy > max ? distance_buffer.accuracy : max;
 
     return pf;
@@ -84,6 +85,20 @@ int select()
 
 void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
+    acc_count++;
+    if (!cache_hit)
+    {
+        misses++;
+    }
+    int index = CACHELINE::search(addr);
+    if (index != -1)
+    {
+        if (cache[index].pf == 1)
+        {
+            pf_use++;
+            cache[index].pf = 0;
+        }
+    }
 
     if (trial_p)
     {
@@ -101,14 +116,17 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         {
             if (nl_buffer.entry[i].pf_addr != 0)
             {
+                prefetch_line(ip, addr, nl_buffer.entry[i].pf_addr, FILL_L2);
                 nl_buffer.pf_count++;
             }
             if (stride_buffer.entry[i].pf_addr != 0)
             {
+                prefetch_line(ip, addr, stride_buffer.entry[i].pf_addr, FILL_L2);
                 stride_buffer.pf_count++;
             }
             if (distance_buffer.entry[i].pf_addr != 0)
             {
+                prefetch_line(ip, addr, distance_buffer.entry[i].pf_addr, FILL_L2);
                 distance_buffer.pf_count++;
             }
         }
@@ -155,38 +173,23 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         }
         }
     }
-
-    acc_count++;
-    if (!cache_hit)
-    {
-        misses++;
-    }
-    int index = CACHELINE::search(addr);
-    if (index != -1)
-    {
-        if (cache[index].pf == 1)
-        {
-            pf_use++;
-            cache[index].pf = 0;
-        }
-    }
 }
 
 void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
-    for (int i = 0; i < N_DEGREE; i++)
-    {
-        uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
-        nl_buffer.insert(pf_addr);
-    }
-
     int index = nl_buffer.search(addr);
     if (index != -1)
     {
         nl_buffer.pf_use++;
         nl_buffer.accuracy = (nl_buffer.pf_use * 1.0) / (nl_buffer.pf_count * 1.0);
         nl_buffer.remove(addr);
+    }
+
+    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
+    for (int i = 0; i < N_DEGREE + 1; i++)
+    {
+        uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
+        nl_buffer.insert(pf_addr);
     }
 }
 
@@ -203,7 +206,7 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
     // check for a tracker hit
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
-    int index = -1;
+    index = -1;
     for (index = 0; index < IP_TRACKER_COUNT; index++)
     {
         if (trackers[index].ip == ip)
@@ -276,11 +279,6 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
                 break;
 
             stride_buffer.insert(pf_address);
-            //FIXME: put in CACHE operate / put in queue  and operate can select later
-            /*if (MSHR.occupancy < (MSHR.SIZE >> 1))
-                prefetch_line(ip, addr, pf_address, FILL_L2);
-            else
-                prefetch_line(ip, addr, pf_address, FILL_LLC);*/
         }
     }
 
@@ -309,7 +307,6 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
     uint64_t page = cl_address >> LOG2_BLOCK_SIZE;
 
     int distance;
-    int index;
     int dindex;
 
     if (!fr)
@@ -421,17 +418,17 @@ void PFBUFFER::insert(uint64_t addr)
         {
             break;
         }
-
-        this->entry[index].pf_addr = addr;
-        for (int i = 0; i < BUFFER_SIZE; i++)
-        {
-            if (this->entry[i].lru < this->entry[index].lru)
-            {
-                this->entry[i].lru++;
-            }
-        }
-        this->entry[index].lru = 0;
     }
+
+    this->entry[index].pf_addr = addr;
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (this->entry[i].lru < this->entry[index].lru)
+        {
+            this->entry[i].lru++;
+        }
+    }
+    this->entry[index].lru = 0;
 }
 
 void PFBUFFER::remove(uint64_t addr)
@@ -534,6 +531,8 @@ void CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way,
 
 void CACHE::l2c_prefetcher_final_stats()
 {
+    cout << "pf_use: " << pf_use << endl;
+    cout << "pf_count: " << pf_count << endl;
     float pf_accuracy = (pf_use * 1.0) / (pf_count * 1.0);
     cout << "\"Accuracy\": " << pf_accuracy << endl;
 }

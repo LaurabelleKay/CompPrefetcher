@@ -48,7 +48,7 @@ class NEXTLINE
 //Distance --------------------------------------------------------------------
 
 #define TABLE_COUNT 1024
-#define DISTANCE_COUNT 3
+#define DISTANCE_COUNT 4
 
 class DISTANCE
 {
@@ -89,38 +89,35 @@ class CACHELINE
 
 //Composite--------------------------------------------------------------------
 #define BUFFER_SIZE 64
-#define TRIAL_PERIOD 2000
-#define EMPTY_INTERVAL 1024
+#define TRIAL_PERIOD 500
 
 class PFBUFFER
 {
-    public:
-        typedef struct pf_entry
+  public:
+    typedef struct pf_entry
+    {
+        uint64_t pf_addr;
+        uint32_t lru;
+    } pf_entry_t;
+
+    pf_entry_t entry[BUFFER_SIZE];
+    uint32_t pf_use;
+    uint32_t pf_count;
+    float accuracy;
+
+    PFBUFFER()
+    {
+        for (int i = 0; i < BUFFER_SIZE; i++)
         {
-            uint64_t pf_addr;
-            uint32_t lru; 
-        }pf_entry_t;
-
-        pf_entry_t entry[BUFFER_SIZE];
-        //uint32_t pf_issued;
-
-        uint32_t pf_use;
-        uint32_t pf_count;
-        float accuracy;
-
-        PFBUFFER()
-        {
-            for(int i = 0; i < BUFFER_SIZE; i++)
-            {
-                entry[i].pf_addr = 0;
-                entry[i].lru = i;
-            }
+            entry[i].pf_addr = 0;
+            entry[i].lru = i;
         }
+    }
 
-        void insert(uint64_t addr);
-        void remove(uint64_t addr);
-        void empty();
-        int search(uint64_t addr);
+    void insert(uint64_t addr);
+    void remove(uint64_t addr);
+    void empty();
+    int search(uint64_t addr);
 };
 
 #endif
