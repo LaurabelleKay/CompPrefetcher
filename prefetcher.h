@@ -88,7 +88,9 @@ class CACHELINE
 };
 
 //Composite--------------------------------------------------------------------
-#define BUFFER_SIZE 48
+#define BUFFER_SIZE 64
+#define TRIAL_PERIOD 2000
+#define EMPTY_INTERVAL 1024
 
 class PFBUFFER
 {
@@ -100,7 +102,11 @@ class PFBUFFER
         }pf_entry_t;
 
         pf_entry_t entry[BUFFER_SIZE];
-        uint32_t pf_issued;
+        //uint32_t pf_issued;
+
+        uint32_t pf_use;
+        uint32_t pf_count;
+        float accuracy;
 
         PFBUFFER()
         {
@@ -113,6 +119,7 @@ class PFBUFFER
 
         void insert(uint64_t addr);
         void remove(uint64_t addr);
+        void empty();
         int search(uint64_t addr);
 };
 

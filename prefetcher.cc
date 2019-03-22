@@ -26,14 +26,17 @@ PFBUFFER nl_buffer;
 PFBUFFER stride_buffer;
 PFBUFFER distance_buffer;
 
-int pf_issued = 0;
+uint32_t timer;
+uint8_t trial_p;
+uint32_t prefetcher;
 
 void CACHE::l2c_prefetcher_initialize()
 {
     cout << "\"Name\": "
-         << "\"Naive\"," << endl;
+         << "\"Single Pref\"," << endl;
     STRIDE::initialize();
     DISTANCE::initialize();
+    trial_p = 1;
 }
 
 void STRIDE::initialize()
@@ -52,39 +55,104 @@ void DISTANCE::initialize()
     int i, j;
     for (i = 0; i < TABLE_COUNT; i++)
     {
-        dtables[i].tag = -1E06;
+        dtables[i].tag = 0;
         dtables[i].lru = i;
         for (j = 0; j < DISTANCE_COUNT; j++)
         {
             dtables[i].distances[j] = 0;
         }
     }
-
     fr = 1;
+}
+
+int select()
+{
+    float max = 0;
+    int pf = -1;
+
+    pf = nl_buffer.accuracy > max ? 1 : pf;
+    max = nl_buffer.accuracy > max ? nl_buffer.accuracy : max;
+
+    pf = stride_buffer.accuracy > max ? 2 : pf;
+    max = stride_buffer.accuracy > max ? stride_buffer.accuracy : max;
+
+    pf = distance_buffer.accuracy > max ? 3 : pf;
+    max = distance_buffer.accuracy > max ? distance_buffer.accuracy : max;
+
+    return pf;
 }
 
 void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    NEXTLINE::operate(addr, ip, cache_hit, type);
-    STRIDE::operate(addr, ip, cache_hit, type);
-    DISTANCE::operate(addr, ip, cache_hit, type);
 
-    for(int i = 0; i < BUFFER_SIZE; i++)
+    if (trial_p)
     {
-        if(nl_buffer.entry[i].pf_addr != 0)
+        timer++;
+        if (timer == TRIAL_PERIOD)
         {
-            prefetch_line(ip, addr, nl_buffer.entry[i].pf_addr, FILL_L2);
-            nl_buffer.remove(nl_buffer.entry[i].pf_addr);
+            prefetcher = select();
+            trial_p = 0;
         }
-        if(stride_buffer.entry[i].pf_addr != 0)
+        NEXTLINE::operate(addr, ip, cache_hit, type);
+        STRIDE::operate(addr, ip, cache_hit, type);
+        DISTANCE::operate(addr, ip, cache_hit, type);
+
+        for (int i = 0; i < BUFFER_SIZE; i++)
         {
-            prefetch_line(ip, addr, stride_buffer.entry[i].pf_addr, FILL_L2);
-            stride_buffer.remove(stride_buffer.entry[i].pf_addr);
+            if (nl_buffer.entry[i].pf_addr != 0)
+            {
+                nl_buffer.pf_count++;
+            }
+            if (stride_buffer.entry[i].pf_addr != 0)
+            {
+                stride_buffer.pf_count++;
+            }
+            if (distance_buffer.entry[i].pf_addr != 0)
+            {
+                distance_buffer.pf_count++;
+            }
         }
-        if(distance_buffer.entry[i].pf_addr != 0)
+    }
+    else
+    {
+        switch (prefetcher)
         {
-            prefetch_line(ip, addr, distance_buffer.entry[i].pf_addr, FILL_L2);
-            distance_buffer.remove(distance_buffer.entry[i].pf_addr);
+        case 0:
+        {
+            NEXTLINE::operate(addr, ip, cache_hit, type);
+            for (int i = 0; i < BUFFER_SIZE; i++)
+            {
+                if (nl_buffer.entry[i].pf_addr != 0)
+                {
+                    prefetch_line(ip, addr, nl_buffer.entry[i].pf_addr, FILL_L2);
+                    nl_buffer.pf_count++;
+                }
+            }
+        }
+        case 1:
+        {
+            STRIDE::operate(addr, ip, cache_hit, type);
+            for (int i = 0; i < BUFFER_SIZE; i++)
+            {
+                if (stride_buffer.entry[i].pf_addr != 0)
+                {
+                    prefetch_line(ip, addr, stride_buffer.entry[i].pf_addr, FILL_L2);
+                    stride_buffer.pf_count++;
+                }
+            }
+        }
+        case 2:
+        {
+            DISTANCE::operate(addr, ip, cache_hit, type);
+            for (int i = 0; i < BUFFER_SIZE; i++)
+            {
+                if (distance_buffer.entry[i].pf_addr != 0)
+                {
+                    prefetch_line(ip, addr, distance_buffer.entry[i].pf_addr, FILL_L2);
+                    distance_buffer.pf_count++;
+                }
+            }
+        }
         }
     }
 
@@ -107,16 +175,31 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
 void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
-    for(int i = 0; i < N_DEGREE; i++)
+    for (int i = 0; i < N_DEGREE; i++)
     {
         uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
         nl_buffer.insert(pf_addr);
-        pf_issued++;
+    }
+
+    int index = nl_buffer.search(addr);
+    if (index != -1)
+    {
+        nl_buffer.pf_use++;
+        nl_buffer.accuracy = (nl_buffer.pf_use * 1.0) / (nl_buffer.pf_count * 1.0);
+        nl_buffer.remove(addr);
     }
 }
 
 void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
+    int index = stride_buffer.search(addr);
+    if (index != -1)
+    {
+        stride_buffer.pf_use++;
+        stride_buffer.accuracy = (stride_buffer.pf_use * 1.0) / (stride_buffer.pf_count * 1.0);
+        stride_buffer.remove(addr);
+    }
+
     // check for a tracker hit
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
@@ -214,6 +297,14 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
 
 void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
+    int index = distance_buffer.search(addr);
+    if (index != -1)
+    {
+        distance_buffer.pf_use++;
+        distance_buffer.accuracy = (distance_buffer.pf_use * 1.0) / (distance_buffer.pf_count * 1.0);
+        distance_buffer.remove(addr);
+    }
+
     uint64_t cl_address = addr >> LOG2_BLOCK_SIZE;
     uint64_t page = cl_address >> LOG2_BLOCK_SIZE;
 
@@ -305,9 +396,9 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         previous_distance = distance;
         previous_index = index;
 
-        for(int i = 0; i < TABLE_COUNT; i++)
+        for (int i = 0; i < TABLE_COUNT; i++)
         {
-            if(dtables[i].lru < dtables[index].lru)
+            if (dtables[i].lru < dtables[index].lru)
             {
                 dtables[i].lru++;
             }
@@ -321,37 +412,65 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
     }
 }
 
-
 void PFBUFFER::insert(uint64_t addr)
 {
-    for(int i = 0; i < BUFFER_SIZE; i++)
+    int index;
+    for (index = 0; index < BUFFER_SIZE; index++)
     {
-        if(this->entry[i].pf_addr == 0)
+        if (this->entry[index].lru == (BUFFER_SIZE - 1))
         {
-            this->entry[i].pf_addr = addr;
-            this->pf_issued++;
-            return;
+            break;
         }
+
+        this->entry[index].pf_addr = addr;
+        for (int i = 0; i < BUFFER_SIZE; i++)
+        {
+            if (this->entry[i].lru < this->entry[index].lru)
+            {
+                this->entry[i].lru++;
+            }
+        }
+        this->entry[index].lru = 0;
     }
 }
 
 void PFBUFFER::remove(uint64_t addr)
 {
-    for(int i = 0; i < BUFFER_SIZE; i++)
+    int index = -1;
+    for (index = 0; index < BUFFER_SIZE; index++)
     {
-        if(this->entry[i].pf_addr == addr)
+        if (this->entry[index].pf_addr == addr)
         {
-            this->entry[i].pf_addr = 0;
+            break;
         }
+    }
+
+    this->entry[index].pf_addr = 0;
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (this->entry[i].lru > this->entry[index].lru)
+        {
+            this->entry[i].lru--;
+        }
+    }
+
+    this->entry[index].lru = BUFFER_SIZE - 1;
+}
+
+void PFBUFFER::empty()
+{
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        this->entry[i].pf_addr = 0;
     }
 }
 
 int PFBUFFER::search(uint64_t addr)
 {
     int index = -1;
-    for(index = 0; index < BUFFER_SIZE; index++)
+    for (index = 0; index < BUFFER_SIZE; index++)
     {
-        if(this->entry[index].pf_addr == addr)
+        if (this->entry[index].pf_addr == addr)
         {
             return index;
         }
