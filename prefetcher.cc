@@ -6,6 +6,7 @@ STRIDE::Ip_tracker_t trackers[IP_TRACKER_COUNT];
 
 //Distance---------------------------------------------------------------------
 
+DISTANCE::IPENTRY itables[IP_COUNT];
 DISTANCE::Distance_table_t dtables[TABLE_COUNT];
 int fr;
 int previous_distance;
@@ -48,6 +49,7 @@ void STRIDE::initialize()
         trackers[i].ip = 0;
         trackers[i].last_cl_addr = 0;
         trackers[i].last_stride = 0;
+        trackers[i].confidence = 0;
     }
 }
 
@@ -99,6 +101,19 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
             cache[index].pf = 0;
         }
     }
+
+    uint32_t set = get_set(addr);
+    get_way(addr, set);
+
+    //TODO: Select based on IP
+    /*
+        search the stride table for this ip
+        if in table && valid
+            STRIDE::operate(...)
+        else
+            
+        
+    */
 
     if (trial_p)
     {
@@ -267,18 +282,21 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
     // stride more than once
     if (stride == trackers[index].last_stride)
     {
-
+        trackers[index].confidence++;
         // do some prefetching
-        for (int i = 0; i < PREFETCH_DEGREE; i++)
+        if (trackers[index].confidence > CONFIDENCE_THRESHOLD)
         {
-            uint64_t pf_address = (cl_addr + (stride * (i + 1))) << LOG2_BLOCK_SIZE;
+            for (int i = 0; i < PREFETCH_DEGREE; i++)
+            {
+                uint64_t pf_address = (cl_addr + (stride * (i + 1))) << LOG2_BLOCK_SIZE;
 
-            // only issue a prefetch if the prefetch address is in the same 4 KB page
-            // as the current demand access address
-            if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
-                break;
+                // only issue a prefetch if the prefetch address is in the same 4 KB page
+                // as the current demand access address
+                if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
+                    break;
 
-            stride_buffer.insert(pf_address);
+                stride_buffer.insert(pf_address);
+            }
         }
     }
 
@@ -303,19 +321,77 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         distance_buffer.remove(addr);
     }
 
-    uint64_t cl_address = addr >> LOG2_BLOCK_SIZE;
-    uint64_t page = cl_address >> LOG2_BLOCK_SIZE;
+    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
     int distance;
     int dindex;
 
-    if (!fr)
+    index = -1;
+    for (index = 0; index < IP_COUNT; index++)
+    {
+        if (itables[index].ip == ip)
+        {
+            break;
+        }
+    }
+
+    //If this IP is not in our table
+    if (index == IP_COUNT)
+    {
+        for (index = 0; index < IP_COUNT; index++)
+        {
+            if (itables[index].lru == IP_COUNT)
+            {
+                break;
+            }
+        }
+
+        itables[index].ip = ip;
+        itables[index].previous_addr = cl_addr;
+        itables[index].previous_index = index;
+
+        for (int i = 0; i < IP_COUNT; i++)
+        {
+            if (itables[i].lru < itables[index].lru)
+            {
+                itables[i].lru++;
+            }
+        }
+
+        return;
+    }
+    if (index == -1)
+    {
+        assert(0);
+    }
+
+    itables[index].operate(addr, ip, cache_hit, type);
+}
+
+void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+{
+    int index, dindex;
+    int64_t distance;
+    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
+
+    if (!this->fr)
     {
         index = -1;
         dindex = -1;
 
         //Calculate this distance
-        distance = cl_address - previous_addr;
+        int64_t distance = 0;
+        if (cl_addr > this->previous_addr)
+        {
+            distance = cl_addr - this->previous_addr;
+        }
+        else
+        {
+            {
+                distance = this->previous_addr - cl_addr;
+                distance *= -1;
+            }
+        }
         if (distance == 0)
         {
             return;
@@ -324,9 +400,9 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         //Find a slot in the previous delta's entry for this distance
         for (dindex = 0; dindex < DISTANCE_COUNT; dindex++)
         {
-            if (dtables[previous_index].distances[dindex] == 0)
+            if (this->dtables[this->previous_index].distances[dindex] == 0)
             {
-                dtables[previous_index].distances[dindex] = distance;
+                this->dtables[this->previous_index].distances[dindex] = distance;
                 break;
             }
         }
@@ -334,7 +410,7 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         for (index = 0; index < TABLE_COUNT; index++)
         {
             //Search for this distance tag in the table
-            if (dtables[index].tag == distance)
+            if (this->dtables[index].tag == distance)
             {
                 break;
             }
@@ -347,28 +423,26 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
             for (index = 0; index < TABLE_COUNT; index++)
             {
                 //Find the least recently used row in the table
-                if (dtables[index].lru == (TABLE_COUNT - 1))
+                if (this->dtables[index].lru == (TABLE_COUNT - 1))
                 {
                     break;
                 }
             }
 
             //Replace with this distance
-            dtables[index].tag = distance;
+            this->dtables[index].tag = distance;
 
             //Increment LRU counter for rows least recently used than evicted row
             for (int i = 0; i < TABLE_COUNT; i++)
             {
-                if (dtables[i].lru < dtables[index].lru)
+                if (this->dtables[i].lru < this->dtables[index].lru)
                 {
-                    dtables[i].lru++;
+                    this->dtables[i].lru++;
                 }
             }
 
-            dtables[index].lru = 0;
-            previous_distance = distance;
-            previous_addr = cl_address;
-
+            this->dtables[index].lru = 0;
+            this->previous_addr = cl_addr;
             return;
         }
 
@@ -379,33 +453,31 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         }
 
         uint64_t pf_addr;
-
         for (int i = 0; i < DISTANCE_COUNT; i++)
         {
-            if (dtables[index].distances[i] != 0)
+            if (this->dtables[index].distances[i] != 0)
             {
-                pf_addr = (cl_address + dtables[index].distances[i]) << LOG2_BLOCK_SIZE;
+                pf_addr = (cl_addr + this->dtables[index].distances[i]) << LOG2_BLOCK_SIZE;
                 distance_buffer.insert(pf_addr);
             }
         }
 
-        previous_addr = cl_address;
-        previous_distance = distance;
-        previous_index = index;
+        this->previous_addr = cl_addr;
+        this->previous_index = index;
 
         for (int i = 0; i < TABLE_COUNT; i++)
         {
-            if (dtables[i].lru < dtables[index].lru)
+            if (this->dtables[i].lru < this->dtables[index].lru)
             {
-                dtables[i].lru++;
+                this->dtables[i].lru++;
             }
         }
-        dtables[index].lru = 0;
+        this->dtables[index].lru = 0;
     }
     else
     {
-        fr = 0;
-        previous_addr = cl_address;
+        this->fr = 0;
+        this->previous_addr = cl_addr;
     }
 }
 
@@ -518,14 +590,14 @@ int CACHELINE::search(uint64_t addr)
 
 void CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr)
 {
-    uint64_t cl_address = addr >> LOG2_BLOCK_SIZE;
+    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
     uint64_t evict_addr = addr >> LOG2_BLOCK_SIZE;
     CACHELINE::insert(addr, prefetch);
     if (prefetch == 1)
     {
         pf_count++;
     }
-    //int index = cache_search(evict_addr);
+
     CACHELINE::remove(evicted_addr);
 }
 
