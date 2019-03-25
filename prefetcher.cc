@@ -92,18 +92,22 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
     {
         misses++;
     }
-    int index = CACHELINE::search(addr);
-    if (index != -1)
-    {
-        if (cache[index].pf == 1)
-        {
-            pf_use++;
-            cache[index].pf = 0;
-        }
-    }
+    ////int index = CACHELINE::search(addr);
+    ////if (index != -1)
+    ////{
+        ////if (cache[index].pf == 1)
+        ////{
+            ////pf_use++;
+            ////cache[index].pf = 0;
+        ////}
+    ////}
 
     uint32_t set = get_set(addr);
-    get_way(addr, set);
+    uint32_t way = get_way(addr, set);
+    if(way < 8 )
+    {
+        pf_use++;
+    }
 
     //TODO: Select based on IP
     /*
@@ -365,6 +369,7 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         assert(0);
     }
 
+    //! Should have a return value
     itables[index].operate(addr, ip, cache_hit, type);
 }
 
@@ -481,6 +486,7 @@ void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, u
     }
 }
 
+//? Potentially unneeded if stride and dist will track
 void PFBUFFER::insert(uint64_t addr)
 {
     int index;
@@ -547,6 +553,7 @@ int PFBUFFER::search(uint64_t addr)
     return -1;
 }
 
+// !Don't need these if we can access the cache directly
 void CACHELINE::insert(uint64_t addr, uint8_t pf)
 {
     int i;
