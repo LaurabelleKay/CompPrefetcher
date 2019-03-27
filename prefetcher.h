@@ -23,10 +23,12 @@ public:
     // the stride between the last two addresses accessed by this IP
     int64_t last_stride;
 
+    //The confidence of our current stride
     uint32_t confidence;
 
-    // use LRU to evict old IP trackers
+    //use LRU to evict old IP trackers
     uint32_t lru;
+
   } Ip_tracker_t;
 
   //TODO: Implement cull, after trial period, remove ip's that are below a cetrain confidence
@@ -55,10 +57,18 @@ public:
 #define TABLE_COUNT 8
 #define IP_COUNT 64
 #define DISTANCE_COUNT 4
+#define DELTA_COUNT 8
 
 class DISTANCE
 {
 public:
+
+  typedef struct Delta_table
+  {
+    uint64_t base_addr;
+    int32_t deltas[DELTA_COUNT];
+  };
+
   typedef struct Distance_table
   {
     int tag;
@@ -72,6 +82,11 @@ public:
     int fr;
     int lru;
     int previous_index;
+
+    uint32_t pf_use;
+    uint32_t pf_issue;
+    float accuracy;
+
     uint64_t ip;
     uint64_t previous_addr;
     Distance_table_t dtables[TABLE_COUNT];

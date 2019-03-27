@@ -49,7 +49,7 @@ void STRIDE::initialize()
         trackers[i].ip = 0;
         trackers[i].last_cl_addr = 0;
         trackers[i].last_stride = 0;
-        trackers[i].confidence = 0;
+        trackers[i].confidence = -i;
     }
 }
 
@@ -92,31 +92,33 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
     {
         misses++;
     }
-    ////int index = CACHELINE::search(addr);
-    ////if (index != -1)
-    ////{
-        ////if (cache[index].pf == 1)
-        ////{
-            ////pf_use++;
-            ////cache[index].pf = 0;
-        ////}
-    ////}
-
-    uint32_t set = get_set(addr);
-    uint32_t way = get_way(addr, set);
-    if(way < 8 )
+    int index = CACHELINE::search(addr);
+    if (index != -1)
     {
-        pf_use++;
+        if (cache[index].pf == 1)
+        {
+            pf_use++;
+            cache[index].pf = 0;
+        }
     }
+
+    ////uint32_t set = get_set(addr);
+    ////uint32_t way = get_way(addr, set);
+    ////if(way < 8 )
+    ////{
+        ////pf_use++;
+    ////}
 
     //TODO: Select based on IP
     /*
-        search the stride table for this ip
-        if in table && valid
-            STRIDE::operate(...)
-        else
-            
-        
+        * search the stride table for this ip
+        * if in table && valid
+        *   STRIDE::operate(...)
+        * else
+        * if in table for dist
+        *   DISTANCE::operate(...)     
+        * else
+        *   NEXTLINE::operate(...)
     */
 
     if (trial_p)
@@ -192,6 +194,8 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         }
         }
     }
+
+
 }
 
 void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
@@ -214,18 +218,18 @@ void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
 
 void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    int index = stride_buffer.search(addr);
-    if (index != -1)
-    {
-        stride_buffer.pf_use++;
-        stride_buffer.accuracy = (stride_buffer.pf_use * 1.0) / (stride_buffer.pf_count * 1.0);
-        stride_buffer.remove(addr);
-    }
+    ////int index = stride_buffer.search(addr);
+    ////if (index != -1)
+    ////{
+        ////stride_buffer.pf_use++;
+        ////stride_buffer.accuracy = (stride_buffer.pf_use * 1.0) / (stride_buffer.pf_count * 1.0);
+        ////stride_buffer.remove(addr);
+    ////}
 
     // check for a tracker hit
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
-    index = -1;
+    int index = -1;
     for (index = 0; index < IP_TRACKER_COUNT; index++)
     {
         if (trackers[index].ip == ip)
@@ -233,25 +237,27 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
     }
 
     // this is a new IP that doesn't have a tracker yet, so allocate one
+    int min = 1E06;
+    int min_index;
+
     if (index == IP_TRACKER_COUNT)
     {
         for (index = 0; index < IP_TRACKER_COUNT; index++)
         {
-            if (trackers[index].lru == (IP_TRACKER_COUNT - 1))
-                break;
+            if(min > trackers[index].confidence)
+            {
+                min_index = index;
+                min = trackers[index].confidence;
+            }
         }
+
+        //Replace the entry with the lowest confidence
+        index = min_index;
 
         trackers[index].ip = ip;
         trackers[index].last_cl_addr = cl_addr;
         trackers[index].last_stride = 0;
-
-        for (int i = 0; i < IP_TRACKER_COUNT; i++)
-        {
-            if (trackers[i].lru < trackers[index].lru)
-                trackers[i].lru++;
-        }
-        trackers[index].lru = 0;
-
+        trackers[index].confidence = 0;
         return;
     }
 
@@ -286,6 +292,7 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
     // stride more than once
     if (stride == trackers[index].last_stride)
     {
+        //Increase the confidence if we've seen this stride before
         trackers[index].confidence++;
         // do some prefetching
         if (trackers[index].confidence > CONFIDENCE_THRESHOLD)
@@ -299,38 +306,46 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
                 if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
                     break;
 
-                stride_buffer.insert(pf_address);
+                if(!trial_p)
+                {
+                    stride_buffer.insert(pf_address);
+                }
             }
         }
+    }
+    else
+    {
+        //Reset our confidence if this is a new stride
+        trackers[index].confidence = 0; 
     }
 
     trackers[index].last_cl_addr = cl_addr;
     trackers[index].last_stride = stride;
 
-    for (int i = 0; i < IP_TRACKER_COUNT; i++)
-    {
-        if (trackers[i].lru < trackers[index].lru)
-            trackers[i].lru++;
-    }
-    trackers[index].lru = 0;
+    ////for (int i = 0; i < IP_TRACKER_COUNT; i++)
+    ////{
+        ////if (trackers[i].lru < trackers[index].lru)
+            ////trackers[i].lru++;
+    ////}
+    ////trackers[index].lru = 0;
 }
 
 void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    int index = distance_buffer.search(addr);
-    if (index != -1)
-    {
-        distance_buffer.pf_use++;
-        distance_buffer.accuracy = (distance_buffer.pf_use * 1.0) / (distance_buffer.pf_count * 1.0);
-        distance_buffer.remove(addr);
-    }
+    ////int index = distance_buffer.search(addr);
+    ////if (index != -1)
+    ////{
+        ////distance_buffer.pf_use++;
+        ////distance_buffer.accuracy = (distance_buffer.pf_use * 1.0) / (distance_buffer.pf_count * 1.0);
+        ////distance_buffer.remove(addr);
+    ////}
 
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
     int distance;
-    int dindex;
+    ////int dindex;
 
-    index = -1;
+    int index = -1;
     for (index = 0; index < IP_COUNT; index++)
     {
         if (itables[index].ip == ip)
@@ -339,7 +354,7 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         }
     }
 
-    //If this IP is not in our table
+    //If this ip is not in our table
     if (index == IP_COUNT)
     {
         for (index = 0; index < IP_COUNT; index++)
@@ -369,11 +384,12 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         assert(0);
     }
 
-    //! Should have a return value
-    itables[index].operate(addr, ip, cache_hit, type);
+    //! FIXME: Should have a return value
+    //itables[index].operate(addr, ip, cache_hit, type);
 }
 
-void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+//Perform distance prefetching for this ip
+/*void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     int index, dindex;
     int64_t distance;
@@ -484,9 +500,10 @@ void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, u
         this->fr = 0;
         this->previous_addr = cl_addr;
     }
-}
+}*/
 
 //? Potentially unneeded if stride and dist will track
+
 void PFBUFFER::insert(uint64_t addr)
 {
     int index;
@@ -553,7 +570,7 @@ int PFBUFFER::search(uint64_t addr)
     return -1;
 }
 
-// !Don't need these if we can access the cache directly
+//! FIXME: Don't need these if we can access the cache directly
 void CACHELINE::insert(uint64_t addr, uint8_t pf)
 {
     int i;
