@@ -37,6 +37,7 @@ public:
   static void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
   static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
   static void stats();
+  static int search(uint64_t ip);
 };
 
 //Next Line -------------------------------------------------------------------
@@ -63,12 +64,6 @@ class DISTANCE
 {
 public:
 
-  typedef struct Delta_table
-  {
-    uint64_t base_addr;
-    int32_t deltas[DELTA_COUNT];
-  };
-
   typedef struct Distance_table
   {
     int tag;
@@ -81,7 +76,9 @@ public:
   public:
     int fr;
     int lru;
-    int previous_index;
+    //int previous_index;
+    uint64_t base_addr;
+    int32_t deltas[DELTA_COUNT];
 
     uint32_t pf_use;
     uint32_t pf_issue;
@@ -89,17 +86,20 @@ public:
 
     uint64_t ip;
     uint64_t previous_addr;
-    Distance_table_t dtables[TABLE_COUNT];
 
     IPENTRY()
     {
-      for (int i = 0; i < TABLE_COUNT; i++)
+      base_addr = 0;
+      ip = 0;
+      fr = 1;
+      previous_addr = 0;
+      previous_index = 0;
+      pf_use = 0;
+      pf_issue = 0;
+      accuracy = 0.0;
+      for(int i = 0; i < DELTA_COUNT; i++)
       {
-        dtables[i].lru = i;
-        previous_addr = 0;
-        previous_index = 0;
-        ip = 0;
-        fr = 1;
+        deltas[i] = 0;
       }
     }
 
@@ -112,6 +112,7 @@ public:
   static void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
   static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
   static void stats();
+  static int search(uint64_t ip);
 };
 
 //Cache tracker----------------------------------------------------------------
