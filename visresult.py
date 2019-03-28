@@ -54,7 +54,7 @@ def main():
     # rects2 = plt.bar(index + bar_width, col_arr1, bar_width, alpha=opacity, color='g', label="NextN")
 
     plt.xlabel("Benchmark")
-    plt.ylabel("IPC")
+    plt.ylabel("Cumulative IPC")
     plt.xticks(index + bar_width, b_name)
     plt.legend()
     plt.tight_layout()
