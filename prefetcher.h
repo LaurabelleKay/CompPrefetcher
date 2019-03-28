@@ -78,7 +78,7 @@ public:
     int lru;
     //int previous_index;
     uint64_t base_addr;
-    int32_t deltas[DELTA_COUNT];
+    int64_t deltas[DELTA_COUNT];
 
     uint32_t pf_use;
     uint32_t pf_issue;
