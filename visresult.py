@@ -13,9 +13,11 @@ def main():
         benchmark = data["Benchmark"][i]["Name"]
         print(benchmark)
         p_num = len(data["Benchmark"][i]["Prefetcher"])
-
+        accuracy_array = np.zeros(p_num)
         for j in range(0, p_num):
             prefetcher = data["Benchmark"][i]["Prefetcher"][j]["Name"]
             print(prefetcher)
-
+            acc = data["Benchmark"][i]["Prefetcher"][j]["Accuracy"]
+            accuracy_array[j] = acc
+        print(accuracy_array)
 main()
