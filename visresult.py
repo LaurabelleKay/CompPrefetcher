@@ -1,6 +1,7 @@
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.stats.mstats import gmean
 
 
 def column(array, i):
@@ -9,7 +10,7 @@ def column(array, i):
 
 def main():
     """main"""
-    with open('out1.json') as results:
+    with open('run50M.json') as results:
         data = json.load(results)
 
     b_num = len(data["Benchmark"])
@@ -17,10 +18,12 @@ def main():
     ipc_array = []
     pf_name = []
     acc_array = []
+    geomean = []
     p_num = 0
     for i in range(0, b_num):
         benchmark = data["Benchmark"][i]["Name"]
         b_name.append(benchmark)
+        #p_num = 4
         p_num = len(data["Benchmark"][i]["Prefetcher"])
         ac_a = []
         i_a = []
@@ -35,31 +38,43 @@ def main():
         ipc_array.append(i_a)
         pf_name.append(p_n)
         acc_array.append(ac_a)
-        print(pf_name)
+        #print(pf_name)
 
     fig, ax = plt.subplots()
     index = np.arange(b_num)
-    bar_width = 0.35
-    opacity = 0.8
-    colours = ((0.223, 0.415, 0.694, opacity), (0.243, 0.588, 0.317, opacity), (0.8, 0.145, 0.160, opacity), (0.325, 0.317, 0.329, opacity),
-               (0.419, 0.298, 0.603, opacity), (0.572, 0.141, 0.156, opacity), (0.580, 0.545, 0.239, opacity))
+    bar_width = 0.1
+    opacity = 1
+    colours = ((0, 0, 0, opacity), (0.050, 0.658, 0, opacity), (1, 0.039, 0.113, opacity), (0.058, 0.541, 1, opacity), (1, 0.733, 0.078, opacity),
+               (0.086, 0.015, 0.862, opacity), (0.941, 0.509, 0, opacity), (0.580, 0.545, 0.239, opacity))
     for i in range(0, p_num):
         ipcs = column(ipc_array, i)
         name = column(pf_name, i)
         rects = plt.bar(index + (i * bar_width), ipcs,
-                        bar_width, color=colours[i], label=name[0])
-
-    # col_arr0 = column(ipc_array, 0)
-    # col_arr1 = column(ipc_array, 1)
-    # rects1 = plt.bar(index, col_arr0, bar_width, alpha=opacity, color='b', label="No")
-    # rects2 = plt.bar(index + bar_width, col_arr1, bar_width, alpha=opacity, color='g', label="NextN")
+                        width=bar_width, color=colours[i], label=name[0], align="center")
 
     plt.xlabel("Benchmark")
     plt.ylabel("Cumulative IPC")
-    plt.xticks(index + bar_width, b_name)
-    plt.legend()
+    plt.xticks(index + (bar_width * 3), b_name)
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, 0.95),
+              ncol=3, fancybox=True, shadow=True)
     plt.tight_layout()
     plt.show()
 
+    fig, ax = plt.subplots()
+    index = np.arange(1)
+
+    for i in range(0, p_num):
+        ipcs = column(acc_array, i)
+        gm = gmean(ipcs)
+        name = column(pf_name, i)
+        plt.bar(i * bar_width, gm, width=bar_width, color=colours[i], label=name[0], align="center")
+
+    #plt.xlabel("Benchmark")
+    plt.ylabel("Geomean Accuracy")
+    plt.xticks(index + (bar_width * 3), " ")
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1),
+               ncol=3, fancybox=True, shadow=True)
+    plt.tight_layout()
+    plt.show()
 
 main()

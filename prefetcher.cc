@@ -84,13 +84,6 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         }
     }
 
-    ////uint32_t set = get_set(addr);
-    ////uint32_t way = get_way(addr, set);
-    ////if(way < 8 )
-    ////{
-    ////pf_use++;
-    ////}
-
     //Always check the stride table first
     if (!trial_p)
     {
@@ -144,79 +137,6 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
             trial_p = 0;
         }
     }
-    /*if (trial_p)
-    {
-        timer++;
-        if (timer == TRIAL_PERIOD)
-        {
-            prefetcher = select();
-            trial_p = 0;
-        }
-        NEXTLINE::operate(addr, ip, cache_hit, type);
-        STRIDE::operate(addr, ip, cache_hit, type);
-        DISTANCE::operate(addr, ip, cache_hit, type);
-
-        for (int i = 0; i < BUFFER_SIZE; i++)
-        {
-            if (nl_buffer.entry[i].pf_addr != 0)
-            {
-                prefetch_line(ip, addr, nl_buffer.entry[i].pf_addr, FILL_L2);
-                nl_buffer.pf_count++;
-            }
-            if (stride_buffer.entry[i].pf_addr != 0)
-            {
-                prefetch_line(ip, addr, stride_buffer.entry[i].pf_addr, FILL_L2);
-                stride_buffer.pf_count++;
-            }
-            if (distance_buffer.entry[i].pf_addr != 0)
-            {
-                prefetch_line(ip, addr, distance_buffer.entry[i].pf_addr, FILL_L2);
-                distance_buffer.pf_count++;
-            }
-        }
-    }
-    else
-    {
-        switch (prefetcher)
-        {
-        case 0:
-        {
-            NEXTLINE::operate(addr, ip, cache_hit, type);
-            for (int i = 0; i < BUFFER_SIZE; i++)
-            {
-                if (nl_buffer.entry[i].pf_addr != 0)
-                {
-                    prefetch_line(ip, addr, nl_buffer.entry[i].pf_addr, FILL_L2);
-                    nl_buffer.pf_count++;
-                }
-            }
-        }
-        case 1:
-        {
-            STRIDE::operate(addr, ip, cache_hit, type);
-            for (int i = 0; i < BUFFER_SIZE; i++)
-            {
-                if (stride_buffer.entry[i].pf_addr != 0)
-                {
-                    prefetch_line(ip, addr, stride_buffer.entry[i].pf_addr, FILL_L2);
-                    stride_buffer.pf_count++;
-                }
-            }
-        }
-        case 2:
-        {
-            DISTANCE::operate(addr, ip, cache_hit, type);
-            for (int i = 0; i < BUFFER_SIZE; i++)
-            {
-                if (distance_buffer.entry[i].pf_addr != 0)
-                {
-                    prefetch_line(ip, addr, distance_buffer.entry[i].pf_addr, FILL_L2);
-                    distance_buffer.pf_count++;
-                }
-            }
-        }
-        }
-    }*/
 }
 
 void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
@@ -467,6 +387,7 @@ void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, u
         {
             return;
         }
+        
         int dindex = -1;
         for (dindex = 0; dindex < DELTA_COUNT; dindex++)
         {
