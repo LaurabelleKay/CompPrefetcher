@@ -86,6 +86,39 @@ public:
   static int search(uint64_t ip);
 };
 
+class DELTA
+{
+public:
+  class IPENTRY
+  {
+  public:
+    uint64_t ip;
+    uint64_t previous_addr;
+    int64_t deltas[DELTA_COUNT];
+    uint32_t confidence;
+    uint16_t tail;
+
+    IPENTRY()
+    {
+      ip = 0;
+      previous_addr = 0;
+      tail = 0;
+      for(int i = 0; i < DELTA_COUNT; i++)
+      {
+        deltas[i] = 0;
+      }
+    }
+
+    void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+  };
+
+  static void initialize();
+  static void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+  static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
+  static void stats();
+  static int search(uint64_t ip);
+};
+
 //Cache tracker----------------------------------------------------------------
 
 class CACHELINE

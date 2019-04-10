@@ -13,6 +13,8 @@ int previous_index;
 int previous_addr;
 unsigned long long int previous_page;
 
+DELTA::IPENTRY ip_del[IP_COUNT];
+
 //Cache tracker----------------------------------------------------------------
 
 CACHELINE cache[4096];
@@ -271,6 +273,94 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
     ////trackers[index].lru = 0;
 }
 
+void DELTA::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+{
+    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
+
+    int index = -1;
+    for(index = 0; index < IP_COUNT; index++)
+    {
+        if(ip_del[index].ip == ip)
+        {
+            break;
+        }
+    }
+
+    int min = 1E06;
+    int min_index = 0;
+
+    if(index == IP_COUNT)
+    {
+        for(index = 0; index < IP_COUNT; index++)
+        {
+            if(min > ip_del[index].confidence)
+            {
+                min_index = index;
+                min = ip_del[index].confidence;
+            }
+        }
+
+        index = min_index;
+        ip_del[index].ip = ip;
+        ip_del[index].previous_addr = cl_addr;
+        ip_del[index].confidence = 0;
+
+        for(int i = 0; i < DELTA_COUNT; i++)
+        {
+            ip_del[index].deltas[i] = 0;
+        }
+
+        return;
+    }
+
+
+}
+
+void DELTA::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+{
+    if(!cache_hit)
+    {
+        uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
+        int64_t delta = 0;
+
+        if(cl_addr > previous_addr)
+        {
+            delta = cl_addr - previous_addr;
+        }
+        else
+        {
+            delta = previous_addr - cl_addr;
+            delta *= -1;
+        }
+
+        if(delta == 0) {return;}
+
+        deltas[tail] = delta;
+
+        previous_addr = cl_addr;
+        int v1, v2;
+        v1 = deltas[tail];
+
+        if(tail > 0)
+        {
+            v2 = deltas[tail - 1];
+        }
+        else
+        {
+            v2 = deltas[DELTA_COUNT - 1];
+        }
+
+        if(tail < DELTA_COUNT - 1)
+        {
+            tail++;
+        }
+        else
+        {
+            tail = 0;
+        }
+    }
+}
+
 void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
     ////int index = distance_buffer.search(addr);
@@ -387,7 +477,7 @@ void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, u
         {
             return;
         }
-        
+
         int dindex = -1;
         for (dindex = 0; dindex < DELTA_COUNT; dindex++)
         {
