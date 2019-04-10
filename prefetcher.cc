@@ -143,15 +143,6 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
 
 void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    // int index = nl_buffer.search(addr);
-    // if (index != -1)
-    // {
-    //     nl_buffer.pf_use++;
-    //     nl_buffer.accuracy = (nl_buffer.pf_use * 1.0) / (nl_buffer.pf_count * 1.0);
-    //     nl_buffer.remove(addr);
-    // }
-
-    //uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
     for (int i = 0; i < N_DEGREE + 1; i++)
     {
         uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
@@ -249,7 +240,7 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
                 if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
                     break;
 
-                if (!trial_p)
+                if (!trial_p) //TODO: get rid of trial period
                 {
                     pf_buf.insert(pf_address);
                 }
@@ -278,9 +269,11 @@ void DELTA::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
     int index = -1;
-    for(index = 0; index < IP_COUNT; index++)
+
+    //Search for this ip in our table
+    for (index = 0; index < IP_COUNT; index++)
     {
-        if(ip_del[index].ip == ip)
+        if (ip_del[index].ip == ip)
         {
             break;
         }
@@ -289,23 +282,25 @@ void DELTA::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
     int min = 1E06;
     int min_index = 0;
 
-    if(index == IP_COUNT)
+    //If this ip isn't in the table, replace the one with the lowest score
+    if (index == IP_COUNT)
     {
-        for(index = 0; index < IP_COUNT; index++)
+        for (index = 0; index < IP_COUNT; index++)
         {
-            if(min > ip_del[index].confidence)
+            if (min > ip_del[index].score)
             {
                 min_index = index;
-                min = ip_del[index].confidence;
+                min = ip_del[index].score;
             }
         }
 
         index = min_index;
         ip_del[index].ip = ip;
         ip_del[index].previous_addr = cl_addr;
-        ip_del[index].confidence = 0;
+        ip_del[index].score = 0;
 
-        for(int i = 0; i < DELTA_COUNT; i++)
+        //Empty the delta table
+        for (int i = 0; i < DELTA_COUNT; i++)
         {
             ip_del[index].deltas[i] = 0;
         }
@@ -313,17 +308,23 @@ void DELTA::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
         return;
     }
 
+    if(index == -1)
+    {
+        assert(0);
+    }
 
+    //Perfom prefetching for this ip
+    ip_del[index].operate(addr, ip, cache_hit, type);
 }
 
 void DELTA::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    if(!cache_hit)
+    if (!cache_hit)
     {
         uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
         int64_t delta = 0;
 
-        if(cl_addr > previous_addr)
+        if (cl_addr > previous_addr)
         {
             delta = cl_addr - previous_addr;
         }
@@ -333,31 +334,46 @@ void DELTA::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint
             delta *= -1;
         }
 
-        if(delta == 0) {return;}
+        if (delta == 0)
+        {
+            return;
+        }
 
+        //Replace the tail (oldest entry)
         deltas[tail] = delta;
-
         previous_addr = cl_addr;
-        int v1, v2;
-        v1 = deltas[tail];
 
-        if(tail > 0)
-        {
-            v2 = deltas[tail - 1];
-        }
-        else
-        {
-            v2 = deltas[DELTA_COUNT - 1];
-        }
+        int t = tail + DELTA_COUNT; //Allows for circular traversal of delta buffer
 
-        if(tail < DELTA_COUNT - 1)
+        //Get the last delta pair
+        int v1 = deltas[t % DELTA_COUNT];
+        int v2 = deltas[(t - 1) % DELTA_COUNT];
+
+        int index = t - 2;
+
+        while((index % DELTA_COUNT) != tail)
         {
-            tail++;
+            //Search for the delta pair in the buffer
+            if(v1 == deltas[index % DELTA_COUNT] && v2 == deltas[(index - 1) % DELTA_COUNT]) //TODO: Update score
+            {
+                prefetch(index + 1);
+            }
+            index --;
         }
-        else
-        {
-            tail = 0;
-        }
+    }
+}
+
+void DELTA::IPENTRY::prefetch(int index)
+{
+    //Get the first prefetch address
+    uint64_t pf_addr = (deltas[index % DELTA_COUNT] + previous_addr) >> LOG2_BLOCK_SIZE;
+    pf_buf.insert(pf_addr);
+
+    //Prefetch the following addresses by adding the deltas
+    for(int i = index + 1; i < tail - 1; i++)
+    {
+        pf_addr += deltas[i % DELTA_COUNT];
+        pf_buf.insert(pf_addr);
     }
 }
 

@@ -95,7 +95,7 @@ public:
     uint64_t ip;
     uint64_t previous_addr;
     int64_t deltas[DELTA_COUNT];
-    uint32_t confidence;
+    uint32_t score;
     uint16_t tail;
 
     IPENTRY()
@@ -110,6 +110,9 @@ public:
     }
 
     void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
+    void insert();
+    int search();
+    void prefetch(int index);
   };
 
   static void initialize();
