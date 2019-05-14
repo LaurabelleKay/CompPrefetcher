@@ -6,14 +6,8 @@ STRIDE::Ip_tracker_t trackers[IP_TRACKER_COUNT];
 
 //Distance---------------------------------------------------------------------
 
-DISTANCE::IPENTRY itables[IP_COUNT];
-int fr;
-int previous_distance;
-int previous_index;
-int previous_addr;
-unsigned long long int previous_page;
-
 DELTA::IPENTRY ip_del[IP_COUNT];
+uint32_t num_entries;
 
 //Cache tracker----------------------------------------------------------------
 
@@ -24,21 +18,20 @@ int acc_count;
 int pf_count;
 int pf_use;
 
-PFBUFFER nl_buffer;
-PFBUFFER stride_buffer;
-PFBUFFER distance_buffer;
 PFBUFFER pf_buf;
 
 uint32_t timer;
 uint8_t trial_p;
 uint32_t prefetcher;
 
+int pf_issued;
+
 void CACHE::l2c_prefetcher_initialize()
 {
     cout << "\"Name\": "
          << "\"Local Pref\"," << endl;
     STRIDE::initialize();
-    DISTANCE::initialize();
+    DELTA::initialize();
     trial_p = 1;
     timer = 0;
 }
@@ -54,19 +47,34 @@ void STRIDE::initialize()
     }
 }
 
-void DISTANCE::initialize()
+void DELTA::initialize()
 {
-    /*int i, j;
-    for (i = 0; i < TABLE_COUNT; i++)
+    for (int i = 0; i < IP_COUNT; i++)
     {
-        dtables[i].tag = 0;
-        dtables[i].lru = i;
-        for (j = 0; j < DISTANCE_COUNT; j++)
+        ip_del[i].score = i * -1;
+    }
+}
+
+void cull()
+{
+    for (int i = 0; i < IP_COUNT; i++)
+    {
+        if (ip_del[i].score < 2)
         {
-            dtables[i].distances[j] = 0;
+            ip_del[i].reset();
         }
-    }*/
-    fr = 1;
+    }
+
+    for (int i = 0; i < IP_TRACKER_COUNT; i++)
+    {
+        if (trackers[i].confidence < 3)
+        {
+            trackers[i].ip = 0;
+            trackers[i].last_cl_addr = 0;
+            trackers[i].last_stride = 0;
+            trackers[i].confidence = 0;
+        }
+    }
 }
 
 void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
@@ -86,34 +94,39 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         }
     }
 
-    int index2;
-    index = STRIDE::search(ip);
-    index2 = DELTA::search(ip);
+    if (timer < RETRAIN_INTERVAL)
+    {
+        timer++;
 
-    //This ip is in both tables
-    if(index != -1 && index2 != -1)
-    {
-        //Select the prefetcher with the higher confidence
-        if(trackers[index].confidence >= ip_del[index2].score)
-        {
-            STRIDE::operate(addr, ip, cache_hit, type);
-        }
-        else
-        {
-            DELTA::operate(addr, ip, cache_hit, type);
-        }
-    }
-    else if(index != -1)
-    {
+        pf_issued = 0;
+
         STRIDE::operate(addr, ip, cache_hit, type);
-    }
-    else if(index2 != -1)
-    {
         DELTA::operate(addr, ip, cache_hit, type);
+
+        if (!pf_issued)
+        {
+            NEXTLINE::operate(addr, ip, cache_hit, type);
+        }
     }
     else
     {
-        NEXTLINE::operate(addr, ip, cache_hit, type);
+        timer = 0;
+        cull();
+    }
+
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        uint64_t pf_addr = pf_buf.entry[i].pf_addr;
+        if (MSHR.occupancy < (MSHR.SIZE >> 1))
+        {
+            prefetch_line(ip, addr, pf_addr, FILL_L2);
+        }
+        else
+        {
+            prefetch_line(ip, addr, pf_addr, FILL_LLC);
+        }
+
+        pf_buf.remove(pf_addr);
     }
 }
 
@@ -122,20 +135,17 @@ void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
     for (int i = 0; i < N_DEGREE + 1; i++)
     {
         uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
-        pf_buf.insert(pf_addr);
+
+        int index = pf_buf.search(pf_addr);
+        if (index == -1)
+        {
+            pf_buf.insert(pf_addr);
+        }
     }
 }
 
 void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    ////int index = stride_buffer.search(addr);
-    ////if (index != -1)
-    ////{
-    ////stride_buffer.pf_use++;
-    ////stride_buffer.accuracy = (stride_buffer.pf_use * 1.0) / (stride_buffer.pf_count * 1.0);
-    ////stride_buffer.remove(addr);
-    ////}
-
     // check for a tracker hit
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
@@ -217,7 +227,14 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
                 {
                     break;
                 }
-                pf_buf.insert(pf_address);
+
+                //Check if this address is already in the buffer
+                int ind = pf_buf.search(pf_address);
+                if (ind == -1)
+                {
+                    pf_issued = 1;
+                    pf_buf.insert(pf_address);
+                }
             }
         }
     }
@@ -249,22 +266,24 @@ void DELTA::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
     //If this ip isn't in the table, replace the one with the lowest score
     if (index == IP_COUNT)
     {
-        int min = 1E06;
+        int32_t min = 1E06;
         int min_index = 0;
 
         for (index = 0; index < IP_COUNT; index++)
         {
+
             if (min > ip_del[index].score)
             {
+
                 min_index = index;
                 min = ip_del[index].score;
             }
         }
-
         index = min_index;
         ip_del[index].ip = ip;
         ip_del[index].previous_addr = cl_addr;
         ip_del[index].score = 0;
+        ip_del[index].tail = 0;
 
         //Empty the delta table
         for (int i = 0; i < DELTA_COUNT; i++)
@@ -289,7 +308,7 @@ void DELTA::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint
     if (!cache_hit)
     {
         uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
-        int64_t delta = 0;
+        int64_t delta;
 
         if (cl_addr > previous_addr)
         {
@@ -325,27 +344,50 @@ void DELTA::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint
             if (v1 == deltas[index % DELTA_COUNT] && v2 == deltas[(index - 1) % DELTA_COUNT])
             {
                 prefetch(index + 1);
+                pf_issued = 1;
                 match++;
+                break;
             }
             index--;
         }
 
-        score = match > 0 ? score++ : 0;
-        tail = tail < DELTA_COUNT - 1 ? tail++ : 0;
+        score = (match > 0) ? score + 1 : 0;
+        tail = (tail < DELTA_COUNT - 1) ? tail + 1 : 0;
     }
 }
 
 void DELTA::IPENTRY::prefetch(int index)
 {
     //Get the first prefetch address
-    uint64_t pf_addr = (deltas[index % DELTA_COUNT] + previous_addr) >> LOG2_BLOCK_SIZE;
-    pf_buf.insert(pf_addr);
+    uint64_t pf_addr = (deltas[index % DELTA_COUNT] + previous_addr);
+    int ind = pf_buf.search(pf_addr << LOG2_BLOCK_SIZE);
 
+    if (ind == -1)
+    {
+        pf_buf.insert(pf_addr << LOG2_BLOCK_SIZE);
+    }
     //Prefetch the following addresses by adding the deltas
     for (int i = index + 1; i < tail - 1; i++)
     {
         pf_addr += deltas[i % DELTA_COUNT];
-        pf_buf.insert(pf_addr);
+
+        ind = pf_buf.search(pf_addr << LOG2_BLOCK_SIZE);
+        if (ind == -1)
+        {
+            pf_buf.insert(pf_addr << LOG2_BLOCK_SIZE);
+        }
+    }
+}
+
+void DELTA::IPENTRY::reset()
+{
+    ip = 0;
+    previous_addr = 0;
+    tail = 0;
+    score = 0;
+    for (int i = 0; i < DELTA_COUNT; i++)
+    {
+        deltas[i] = 0;
     }
 }
 
@@ -429,9 +471,9 @@ int STRIDE::search(uint64_t ip)
 
 int DELTA::search(uint64_t ip)
 {
-    for(int i = 0; i < IP_COUNT; i++)
+    for (int i = 0; i < IP_COUNT; i++)
     {
-        if(ip_del[i].ip == ip)
+        if (ip_del[i].ip == ip)
         {
             return i;
         }

@@ -7,7 +7,7 @@
 
 #define IP_TRACKER_COUNT 1024
 #define PREFETCH_DEGREE 3
-#define CONFIDENCE_THRESHOLD 4
+#define CONFIDENCE_THRESHOLD 3
 
 class STRIDE
 {
@@ -50,41 +50,8 @@ public:
 
 //Distance --------------------------------------------------------------------
 
-#define IP_COUNT 64
-#define DELTA_COUNT 8
-
-class DISTANCE
-{
-public:
-  class IPENTRY
-  {
-  public:
-    uint32_t lru;
-    uint64_t base_addr;
-    int64_t deltas[DELTA_COUNT];
-    uint64_t ip;
-    uint64_t previous_addr;
-
-    IPENTRY()
-    {
-      base_addr = 0;
-      ip = 0;
-      previous_addr = 0;
-      for (int i = 0; i < DELTA_COUNT; i++)
-      {
-        deltas[i] = 0;
-      }
-    }
-
-    void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
-  };
-
-  static void initialize();
-  static void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
-  static void fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr);
-  static void stats();
-  static int search(uint64_t ip);
-};
+#define IP_COUNT 200
+#define DELTA_COUNT 16
 
 class DELTA
 {
@@ -95,7 +62,7 @@ public:
     uint64_t ip;
     uint64_t previous_addr;
     int64_t deltas[DELTA_COUNT];
-    uint32_t score;
+    int32_t score;
     uint16_t tail;
 
     IPENTRY()
@@ -103,7 +70,8 @@ public:
       ip = 0;
       previous_addr = 0;
       tail = 0;
-      for(int i = 0; i < DELTA_COUNT; i++)
+      score = 0;
+      for (int i = 0; i < DELTA_COUNT; i++)
       {
         deltas[i] = 0;
       }
@@ -112,6 +80,7 @@ public:
     void operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type);
     void insert();
     int search();
+    void reset();
     void prefetch(int index);
   };
 
@@ -144,8 +113,10 @@ public:
 };
 
 //Composite--------------------------------------------------------------------
+
 #define BUFFER_SIZE 16
-#define TRIAL_PERIOD 2048
+#define TRIAL_PERIOD 20000
+#define RETRAIN_INTERVAL 2000
 
 class PFBUFFER
 {
