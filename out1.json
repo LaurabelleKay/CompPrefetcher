@@ -4,11 +4,13 @@
             "Name": "perlbench",
             "Prefetcher": [
                 {
+                    "Name": "No",
                     "Cumulative IPC": 0.0651757,
                     "MissL1D": 12,
                     "MissL1I": 10,
                     "MissL2C": 21,
-                    "MissLLC": 21
+                    "MissLLC": 21,
+                    "Accuracy": 0
                 },
                 {
                     "Name": "Next N",
@@ -25,11 +27,13 @@
             "Name": "gcc",
             "Prefetcher": [
                 {
+                    "Name": "No",
                     "Cumulative IPC": 0.0547945,
                     "MissL1D": 5,
                     "MissL1I": 7,
                     "MissL2C": 12,
-                    "MissLLC": 12
+                    "MissLLC": 12,
+                    "Accuracy": 0
                 },
                 {
                     "Name": "Next N",
