@@ -7,15 +7,9 @@ from scipy.stats.mstats import gmean
 def column(array, i):
     return [row[i] for row in array]
 
-
-
-def column(array, i):
-    return [row[i] for row in array]
-
-
 def main():
     """main"""
-    with open('out1.json') as results:
+    with open('final.json') as results:
         data = json.load(results)
 
     b_num = len(data["Benchmark"])

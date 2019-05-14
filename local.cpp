@@ -1,4 +1,4 @@
-#include "prefetcher.h"
+#include "local.h"
 
 //Stride-----------------------------------------------------------------------
 
@@ -94,7 +94,7 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         }
     }
 
-    if (timer < RETRAIN_INTERVAL)
+    if (timer < INTERVAL)
     {
         timer++;
 
@@ -452,30 +452,6 @@ int PFBUFFER::search(uint64_t addr)
         if (this->entry[index].pf_addr == addr)
         {
             return index;
-        }
-    }
-    return -1;
-}
-
-int STRIDE::search(uint64_t ip)
-{
-    for (int i = 0; i < IP_TRACKER_COUNT; i++)
-    {
-        if (trackers[i].ip == ip)
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int DELTA::search(uint64_t ip)
-{
-    for (int i = 0; i < IP_COUNT; i++)
-    {
-        if (ip_del[i].ip == ip)
-        {
-            return i;
         }
     }
     return -1;
