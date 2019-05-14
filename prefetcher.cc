@@ -6,12 +6,8 @@ STRIDE::Ip_tracker_t trackers[IP_TRACKER_COUNT];
 
 //Distance---------------------------------------------------------------------
 
-DISTANCE::IPENTRY itables[IP_COUNT];
-int fr;
-int previous_distance;
-int previous_index;
-int previous_addr;
-unsigned long long int previous_page;
+DELTA::IPENTRY ip_del[IP_COUNT];
+uint32_t num_entries;
 
 //Cache tracker----------------------------------------------------------------
 
@@ -22,21 +18,20 @@ int acc_count;
 int pf_count;
 int pf_use;
 
-PFBUFFER nl_buffer;
-PFBUFFER stride_buffer;
-PFBUFFER distance_buffer;
 PFBUFFER pf_buf;
 
 uint32_t timer;
 uint8_t trial_p;
 uint32_t prefetcher;
 
+int pf_issued;
+
 void CACHE::l2c_prefetcher_initialize()
 {
     cout << "\"Name\": "
-         << "\"Single Pref\"," << endl;
+         << "\"Local Pref\"," << endl;
     STRIDE::initialize();
-    DISTANCE::initialize();
+    DELTA::initialize();
     trial_p = 1;
     timer = 0;
 }
@@ -45,7 +40,6 @@ void STRIDE::initialize()
 {
     for (int i = 0; i < IP_TRACKER_COUNT; i++)
     {
-        trackers[i].lru = i;
         trackers[i].ip = 0;
         trackers[i].last_cl_addr = 0;
         trackers[i].last_stride = 0;
@@ -53,36 +47,34 @@ void STRIDE::initialize()
     }
 }
 
-void DISTANCE::initialize()
+void DELTA::initialize()
 {
-    /*int i, j;
-    for (i = 0; i < TABLE_COUNT; i++)
+    for (int i = 0; i < IP_COUNT; i++)
     {
-        dtables[i].tag = 0;
-        dtables[i].lru = i;
-        for (j = 0; j < DISTANCE_COUNT; j++)
-        {
-            dtables[i].distances[j] = 0;
-        }
-    }*/
-    fr = 1;
+        ip_del[i].score = i * -1;
+    }
 }
 
-int select()
+void cull()
 {
-    float max = 0;
-    int pf = -1;
+    for (int i = 0; i < IP_COUNT; i++)
+    {
+        if (ip_del[i].score < 2)
+        {
+            ip_del[i].reset();
+        }
+    }
 
-    pf = nl_buffer.accuracy > max ? 0 : pf;
-    max = nl_buffer.accuracy > max ? nl_buffer.accuracy : max;
-
-    pf = stride_buffer.accuracy > max ? 1 : pf;
-    max = stride_buffer.accuracy > max ? stride_buffer.accuracy : max;
-
-    pf = distance_buffer.accuracy > max ? 2 : pf;
-    max = distance_buffer.accuracy > max ? distance_buffer.accuracy : max;
-
-    return pf;
+    for (int i = 0; i < IP_TRACKER_COUNT; i++)
+    {
+        if (trackers[i].confidence < 3)
+        {
+            trackers[i].ip = 0;
+            trackers[i].last_cl_addr = 0;
+            trackers[i].last_stride = 0;
+            trackers[i].confidence = 0;
+        }
+    }
 }
 
 void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
@@ -102,153 +94,58 @@ void CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit
         }
     }
 
-    ////uint32_t set = get_set(addr);
-    ////uint32_t way = get_way(addr, set);
-    ////if(way < 8 )
-    ////{
-    ////pf_use++;
-    ////}
-
-    int index;
-    //Always check the stride table first
-    if (!trial_p)
+    if (timer < RETRAIN_INTERVAL)
     {
-        index = STRIDE::search(ip);
-        if (index != -1)
+        timer++;
+
+        pf_issued = 0;
+
+        STRIDE::operate(addr, ip, cache_hit, type);
+        DELTA::operate(addr, ip, cache_hit, type);
+
+        if (!pf_issued)
         {
-            STRIDE::operate(addr, ip, cache_hit, type);
+            NEXTLINE::operate(addr, ip, cache_hit, type);
+        }
+    }
+    else
+    {
+        timer = 0;
+        cull();
+    }
+
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        uint64_t pf_addr = pf_buf.entry[i].pf_addr;
+        if (MSHR.occupancy < (MSHR.SIZE >> 1))
+        {
+            prefetch_line(ip, addr, pf_addr, FILL_L2);
         }
         else
         {
-            //! Distance has no metric
-            //check if it's been trained by the distance pref
-            index = DISTANCE::search(ip);
-            if (index != -1)
-            {
-                DISTANCE::operate(addr, ip, cache_hit, type);
-            }
-            else
-            {
-                //Resort to next line
-                NEXTLINE::operate(addr, ip, cache_hit, type);
-            }
+            prefetch_line(ip, addr, pf_addr, FILL_LLC);
         }
 
-        for(int i = 0; i < BUFFER_SIZE; i++)
-        {
-            prefetch_line(ip, addr, pf_buf.entry[i].pf_addr, FILL_L2);
-            pf_buf.remove(pf_buf.entry[i].pf_addr);
-        }
+        pf_buf.remove(pf_addr);
     }
-    else
-    {
-        STRIDE::operate(addr, ip, cache_hit, type);
-        DISTANCE::operate(addr, ip, cache_hit, type);
-        NEXTLINE::operate(addr, ip, cache_hit, type);
-    }
-    /*if (trial_p)
-    {
-        timer++;
-        if (timer == TRIAL_PERIOD)
-        {
-            prefetcher = select();
-            trial_p = 0;
-        }
-        NEXTLINE::operate(addr, ip, cache_hit, type);
-        STRIDE::operate(addr, ip, cache_hit, type);
-        DISTANCE::operate(addr, ip, cache_hit, type);
-
-        for (int i = 0; i < BUFFER_SIZE; i++)
-        {
-            if (nl_buffer.entry[i].pf_addr != 0)
-            {
-                prefetch_line(ip, addr, nl_buffer.entry[i].pf_addr, FILL_L2);
-                nl_buffer.pf_count++;
-            }
-            if (stride_buffer.entry[i].pf_addr != 0)
-            {
-                prefetch_line(ip, addr, stride_buffer.entry[i].pf_addr, FILL_L2);
-                stride_buffer.pf_count++;
-            }
-            if (distance_buffer.entry[i].pf_addr != 0)
-            {
-                prefetch_line(ip, addr, distance_buffer.entry[i].pf_addr, FILL_L2);
-                distance_buffer.pf_count++;
-            }
-        }
-    }
-    else
-    {
-        switch (prefetcher)
-        {
-        case 0:
-        {
-            NEXTLINE::operate(addr, ip, cache_hit, type);
-            for (int i = 0; i < BUFFER_SIZE; i++)
-            {
-                if (nl_buffer.entry[i].pf_addr != 0)
-                {
-                    prefetch_line(ip, addr, nl_buffer.entry[i].pf_addr, FILL_L2);
-                    nl_buffer.pf_count++;
-                }
-            }
-        }
-        case 1:
-        {
-            STRIDE::operate(addr, ip, cache_hit, type);
-            for (int i = 0; i < BUFFER_SIZE; i++)
-            {
-                if (stride_buffer.entry[i].pf_addr != 0)
-                {
-                    prefetch_line(ip, addr, stride_buffer.entry[i].pf_addr, FILL_L2);
-                    stride_buffer.pf_count++;
-                }
-            }
-        }
-        case 2:
-        {
-            DISTANCE::operate(addr, ip, cache_hit, type);
-            for (int i = 0; i < BUFFER_SIZE; i++)
-            {
-                if (distance_buffer.entry[i].pf_addr != 0)
-                {
-                    prefetch_line(ip, addr, distance_buffer.entry[i].pf_addr, FILL_L2);
-                    distance_buffer.pf_count++;
-                }
-            }
-        }
-        }
-    }*/
 }
 
 void NEXTLINE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    // int index = nl_buffer.search(addr);
-    // if (index != -1)
-    // {
-    //     nl_buffer.pf_use++;
-    //     nl_buffer.accuracy = (nl_buffer.pf_use * 1.0) / (nl_buffer.pf_count * 1.0);
-    //     nl_buffer.remove(addr);
-    // }
-
-    //uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
     for (int i = 0; i < N_DEGREE + 1; i++)
     {
         uint64_t pf_addr = ((addr >> LOG2_BLOCK_SIZE) + i) << LOG2_BLOCK_SIZE;
-        pf_buf.insert(pf_addr);
+
+        int index = pf_buf.search(pf_addr);
+        if (index == -1)
+        {
+            pf_buf.insert(pf_addr);
+        }
     }
 }
 
 void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    ////int index = stride_buffer.search(addr);
-    ////if (index != -1)
-    ////{
-    ////stride_buffer.pf_use++;
-    ////stride_buffer.accuracy = (stride_buffer.pf_use * 1.0) / (stride_buffer.pf_count * 1.0);
-    ////stride_buffer.remove(addr);
-    ////}
-
     // check for a tracker hit
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
@@ -261,7 +158,7 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
 
     // this is a new IP that doesn't have a tracker yet, so allocate one
     int min = 1E06;
-    int min_index;
+    int min_index = 0;
 
     if (index == IP_TRACKER_COUNT)
     {
@@ -327,10 +224,15 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
                 // only issue a prefetch if the prefetch address is in the same 4 KB page
                 // as the current demand access address
                 if ((pf_address >> LOG2_PAGE_SIZE) != (addr >> LOG2_PAGE_SIZE))
-                    break;
-
-                if (!trial_p)
                 {
+                    break;
+                }
+
+                //Check if this address is already in the buffer
+                int ind = pf_buf.search(pf_address);
+                if (ind == -1)
+                {
+                    pf_issued = 1;
                     pf_buf.insert(pf_address);
                 }
             }
@@ -344,63 +246,50 @@ void STRIDE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type
 
     trackers[index].last_cl_addr = cl_addr;
     trackers[index].last_stride = stride;
-
-    ////for (int i = 0; i < IP_TRACKER_COUNT; i++)
-    ////{
-    ////if (trackers[i].lru < trackers[index].lru)
-    ////trackers[i].lru++;
-    ////}
-    ////trackers[index].lru = 0;
 }
 
-void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+void DELTA::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    ////int index = distance_buffer.search(addr);
-    ////if (index != -1)
-    ////{
-    ////distance_buffer.pf_use++;
-    ////distance_buffer.accuracy = (distance_buffer.pf_use * 1.0) / (distance_buffer.pf_count * 1.0);
-    ////distance_buffer.remove(addr);
-    ////}
-
     uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
 
-    int distance;
-    ////int dindex;
-
     int index = -1;
+
+    //Search for this ip in our table
     for (index = 0; index < IP_COUNT; index++)
     {
-        if (itables[index].ip == ip)
+        if (ip_del[index].ip == ip)
         {
             break;
         }
     }
 
-    //If this ip is not in our table
+    //If this ip isn't in the table, replace the one with the lowest score
     if (index == IP_COUNT)
     {
+        int32_t min = 1E06;
+        int min_index = 0;
+
         for (index = 0; index < IP_COUNT; index++)
         {
-            if (itables[index].lru == (IP_COUNT - 1))
+
+            if (min > ip_del[index].score)
             {
-                break;
+
+                min_index = index;
+                min = ip_del[index].score;
             }
         }
+        index = min_index;
+        ip_del[index].ip = ip;
+        ip_del[index].previous_addr = cl_addr;
+        ip_del[index].score = 0;
+        ip_del[index].tail = 0;
 
-        itables[index].ip = ip;
-        itables[index].base_addr = cl_addr;
-        itables[index].previous_addr = cl_addr;
-        //itables[index].previous_index = index;
-
-        for (int i = 0; i < IP_COUNT; i++)
+        //Empty the delta table
+        for (int i = 0; i < DELTA_COUNT; i++)
         {
-            if (itables[i].lru < itables[index].lru)
-            {
-                itables[i].lru++;
-            }
+            ip_del[index].deltas[i] = 0;
         }
-        itables[index].lru = 0;
 
         return;
     }
@@ -410,208 +299,97 @@ void DISTANCE::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t ty
         assert(0);
     }
 
-    itables[index].operate(addr, ip, cache_hit, type);
-
-    itables[index].previous_addr = cl_addr;
-    for (int i = 0; i < IP_COUNT; i++)
-    {
-        if (itables[i].lru < itables[index].lru)
-        {
-            itables[i].lru++;
-        }
-    }
-    itables[index].lru = 0;
+    //Perfom prefetching for this ip
+    ip_del[index].operate(addr, ip, cache_hit, type);
 }
 
-//Perform distance prefetching for this ip
-/*void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+void DELTA::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
 {
-    int index, dindex;
-    int64_t distance;
-    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
-
-    if (!this->fr)
+    if (!cache_hit)
     {
-        index = -1;
-        dindex = -1;
+        uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
+        int64_t delta;
 
-        //Calculate this distance
-        int64_t distance = 0;
-        if (cl_addr > this->previous_addr)
+        if (cl_addr > previous_addr)
         {
-            distance = cl_addr - this->previous_addr;
+            delta = cl_addr - previous_addr;
         }
         else
         {
-            {
-                distance = this->previous_addr - cl_addr;
-                distance *= -1;
-            }
+            delta = previous_addr - cl_addr;
+            delta *= -1;
         }
-        if (distance == 0)
+
+        if (delta == 0)
         {
             return;
         }
 
-        //Find a slot in the previous delta's entry for this distance
-        for (dindex = 0; dindex < DISTANCE_COUNT; dindex++)
+        //Replace the tail (oldest entry)
+        deltas[tail] = delta;
+        previous_addr = cl_addr;
+
+        int t = tail + DELTA_COUNT; //Allows for circular traversal of delta buffer
+
+        //Get the last delta pair
+        int v1 = deltas[t % DELTA_COUNT];
+        int v2 = deltas[(t - 1) % DELTA_COUNT];
+
+        int index = t - 2;
+        uint8_t match = 0;
+
+        while ((index % DELTA_COUNT) != tail)
         {
-            if (this->dtables[this->previous_index].distances[dindex] == 0)
+            //Search for the delta pair in the buffer
+            if (v1 == deltas[index % DELTA_COUNT] && v2 == deltas[(index - 1) % DELTA_COUNT])
             {
-                this->dtables[this->previous_index].distances[dindex] = distance;
+                prefetch(index + 1);
+                pf_issued = 1;
+                match++;
                 break;
             }
+            index--;
         }
 
-        for (index = 0; index < TABLE_COUNT; index++)
-        {
-            //Search for this distance tag in the table
-            if (this->dtables[index].tag == distance)
-            {
-                break;
-            }
-        }
-
-        //If this distance is not in our table
-        if (index == TABLE_COUNT)
-        {
-
-            for (index = 0; index < TABLE_COUNT; index++)
-            {
-                //Find the least recently used row in the table
-                if (this->dtables[index].lru == (TABLE_COUNT - 1))
-                {
-                    break;
-                }
-            }
-
-            //Replace with this distance
-            this->dtables[index].tag = distance;
-
-            //Increment LRU counter for rows least recently used than evicted row
-            for (int i = 0; i < TABLE_COUNT; i++)
-            {
-                if (this->dtables[i].lru < this->dtables[index].lru)
-                {
-                    this->dtables[i].lru++;
-                }
-            }
-
-            this->dtables[index].lru = 0;
-            this->previous_addr = cl_addr;
-            return;
-        }
-
-        //Check that we now have an index
-        if (index == -1)
-        {
-            assert(0);
-        }
-
-        uint64_t pf_addr;
-        for (int i = 0; i < DISTANCE_COUNT; i++)
-        {
-            if (this->dtables[index].distances[i] != 0)
-            {
-                pf_addr = (cl_addr + this->dtables[index].distances[i]) << LOG2_BLOCK_SIZE;
-                distance_buffer.insert(pf_addr);
-            }
-        }
-
-        this->previous_addr = cl_addr;
-        this->previous_index = index;
-
-        for (int i = 0; i < TABLE_COUNT; i++)
-        {
-            if (this->dtables[i].lru < this->dtables[index].lru)
-            {
-                this->dtables[i].lru++;
-            }
-        }
-        this->dtables[index].lru = 0;
+        score = (match > 0) ? score + 1 : 0;
+        tail = (tail < DELTA_COUNT - 1) ? tail + 1 : 0;
     }
-    else
-    {
-        this->fr = 0;
-        this->previous_addr = cl_addr;
-    }
-}*/
-
-void DISTANCE::IPENTRY::operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
-{
-    int64_t delta;
-    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
-
-    if (cl_addr > this->previous_addr)
-    {
-        delta = cl_addr - this->previous_addr;
-    }
-    else
-    {
-        delta = this->previous_addr - cl_addr;
-        delta *= -1;
-    }
-
-    int index = -1;
-    uint64_t curr_addr = this->base_addr;
-
-    //Check for this address in our table using the deltas;
-    for (index = 0; index < DELTA_COUNT; index++)
-    {
-        curr_addr += this->deltas[index];
-        if (curr_addr == cl_addr)
-        {
-            break;
-        }
-    }
-    //? By checking if this was a cache hit we can determine if the pf was useful?
-
-    //If we were able to find this address, issue the prefetch
-    uint64_t pf_addr;
-    if (index < DELTA_COUNT)
-    {
-        for (int i = index; i < DELTA_COUNT; i++)
-        {
-            pf_addr = (cl_addr + this->deltas[i]) << LOG2_BLOCK_SIZE;
-            pf_buf.insert(pf_addr);
-        }
-    }
-
-    if (delta == 0)
-    {
-        return;
-    }
-    int dindex = -1;
-    for (dindex = 0; dindex < DELTA_COUNT; dindex++)
-    {
-        if (this->deltas[dindex] == 0)
-        {
-            break;
-        }
-    }
-
-    //If the delta table is full
-    if (dindex == DELTA_COUNT)
-    {
-        //Shuffle our deltas left
-        this->base_addr += this->deltas[0];
-        for (int i = 0; i < DELTA_COUNT - 1; i++)
-        {
-            this->deltas[i] = this->deltas[i + 1];
-        }
-
-        dindex = DELTA_COUNT - 1;
-    }
-
-    if (dindex == -1)
-    {
-        assert(0);
-    }
-    
-    this->deltas[dindex] = delta;
 }
 
-//? Potentially unneeded if stride and dist will track
+void DELTA::IPENTRY::prefetch(int index)
+{
+    //Get the first prefetch address
+    uint64_t pf_addr = (deltas[index % DELTA_COUNT] + previous_addr);
+    int ind = pf_buf.search(pf_addr << LOG2_BLOCK_SIZE);
+
+    if (ind == -1)
+    {
+        pf_buf.insert(pf_addr << LOG2_BLOCK_SIZE);
+    }
+    //Prefetch the following addresses by adding the deltas
+    for (int i = index + 1; i < tail - 1; i++)
+    {
+        pf_addr += deltas[i % DELTA_COUNT];
+
+        ind = pf_buf.search(pf_addr << LOG2_BLOCK_SIZE);
+        if (ind == -1)
+        {
+            pf_buf.insert(pf_addr << LOG2_BLOCK_SIZE);
+        }
+    }
+}
+
+void DELTA::IPENTRY::reset()
+{
+    ip = 0;
+    previous_addr = 0;
+    tail = 0;
+    score = 0;
+    for (int i = 0; i < DELTA_COUNT; i++)
+    {
+        deltas[i] = 0;
+    }
+}
 
 void PFBUFFER::insert(uint64_t addr)
 {
@@ -691,11 +469,11 @@ int STRIDE::search(uint64_t ip)
     return -1;
 }
 
-int DISTANCE::search(uint64_t ip)
+int DELTA::search(uint64_t ip)
 {
     for (int i = 0; i < IP_COUNT; i++)
     {
-        if (itables[i].ip == ip)
+        if (ip_del[i].ip == ip)
         {
             return i;
         }
@@ -746,8 +524,6 @@ int CACHELINE::search(uint64_t addr)
 
 void CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr)
 {
-    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
-    uint64_t evict_addr = addr >> LOG2_BLOCK_SIZE;
     CACHELINE::insert(addr, prefetch);
     if (prefetch == 1)
     {
@@ -759,8 +535,6 @@ void CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way,
 
 void CACHE::l2c_prefetcher_final_stats()
 {
-    cout << "pf_use: " << pf_use << endl;
-    cout << "pf_count: " << pf_count << endl;
     float pf_accuracy = (pf_use * 1.0) / (pf_count * 1.0);
     cout << "\"Accuracy\": " << pf_accuracy << endl;
 }
